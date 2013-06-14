@@ -35,7 +35,7 @@ compileEnfaToDfa (ENFA ts q0 as) = DFA transitionArray (fromJust $ Map.lookup (S
     codeToState = foldr (\(qs, i) m -> Map.insert i qs m) Map.empty $ zip states [0..]
 
     transitions = buildTransitions Map.empty $ Set.singleton q0
-    states = Map.keys transitions
+    states = Set.toList $ Map.foldr (\v m -> Map.foldr Set.insert m v) (Map.keysSet transitions) transitions
 
     acceptStates :: Set Int
     acceptStates = Set.foldr (\a ac -> Set.union ac $ Set.fromList $ Map.elems $ Map.filterWithKey (\k _ -> overlap k $ reverseEpsilonClosure ts a) stateToCode) Set.empty as
