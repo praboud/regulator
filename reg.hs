@@ -9,14 +9,14 @@ import Data.Maybe (fromJust, isJust, fromMaybe, mapMaybe)
 
 import Control.Monad (foldM)
 
-data DFA c s = DFA (Array (s, c) (Maybe s)) s (Set s)
+data DFA c s = DFA (Array (s, c) (Maybe s)) s (Set s) deriving Show
 
 accept :: (Ix c, Ix s) => DFA c s -> [c] -> Bool
 accept (DFA ts q0 as) = maybe False (flip Set.member as) . foldM transition q0
     where
     transition q c = ts ! (q, c)
 
-data ENFA c s = ENFA (Map s (Map (Maybe c) (Set s))) s (Set s)
+data ENFA c s = ENFA (Map s (Map (Maybe c) (Set s))) s (Set s) deriving Show
 
 compileEnfaToDfa :: forall c s. (Ix c, Ix s) => ENFA c s -> DFA c Int
 compileEnfaToDfa (ENFA ts q0 as) = DFA transitionArray (fromJust $ Map.lookup (Set.singleton q0) stateToCode) acceptStates
@@ -52,7 +52,7 @@ compileEnfaToDfa (ENFA ts q0 as) = DFA transitionArray (fromJust $ Map.lookup (S
         equivalentqs = Set.foldr (\s ss -> Set.union ss $ epsilonClosure ts s) Set.empty qs
 
         nonEmptyTransitions :: s -> (Map c (Set s))
-        nonEmptyTransitions = Map.mapKeysMonotonic fromJust . Map.filterWithKey (\k _ -> isJust k) . fromJust . flip Map.lookup ts
+        nonEmptyTransitions = maybe Map.empty (Map.mapKeysMonotonic fromJust . Map.filterWithKey (\k _ -> isJust k)) . flip Map.lookup ts
 
         neighbours :: Map c (Set s)
         neighbours = Set.foldr (\q m -> Map.unionWith Set.union m $ nonEmptyTransitions q) Map.empty equivalentqs
@@ -79,8 +79,5 @@ reverseEpsilonClosure ts = reverseEpsilonClosure_h Set.empty
         where
         sources' :: Set s
         sources' = Map.foldrWithKey (\state statetrans src -> if fromMaybe False (Map.lookup Nothing statetrans >>= return . Set.member q) then Set.insert state src else src) Set.empty ts
-
--- setCartesianProduct :: Ord x => [Set x] -> Set (Set x)
--- setCartesianProduct = Set.fromList . foldr (\set prod -> [Set.insert e p | e <- Set.elems set, p <- prod]) [Set.empty]
 
 main = return ()
