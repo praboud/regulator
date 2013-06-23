@@ -8,6 +8,7 @@ import Data.Ix (Ix, range)
 import Data.Maybe (fromJust, isJust, fromMaybe, mapMaybe)
 
 import Control.Monad (foldM)
+import Text.ParserCombinators.Parsec
 
 data DFA c s = DFA (Array (s, c) (Maybe s)) s (Set s) deriving Show
 
@@ -29,6 +30,7 @@ compileEnfaToDfa (ENFA ts q0 as) = DFA transitionArray (fromJust $ Map.lookup (S
     transitionArray = array arrayBounds $ map (\(s, c) -> ((s, c), Map.lookup s codeToState >>= flip Map.lookup transitions >>= Map.lookup c >>= flip Map.lookup stateToCode)) $ range arrayBounds
     arrayBounds = ((0, minSym), (Map.size transitions - 1, maxSym))
 
+    -- fix me: i won't define codes for stuff which has no transitions coming from it
     stateToCode :: Map (Set s) Int
     stateToCode = foldr (\(qs, i) m -> Map.insert qs i m) Map.empty $ zip states [0..]
     codeToState :: Map Int (Set s)
@@ -79,5 +81,39 @@ reverseEpsilonClosure ts = reverseEpsilonClosure_h Set.empty
         where
         sources' :: Set s
         sources' = Map.foldrWithKey (\state statetrans src -> if fromMaybe False (Map.lookup Nothing statetrans >>= return . Set.member q) then Set.insert state src else src) Set.empty ts
+
+enfaStateSet :: (Ord c, Ord s) => ENFA c s -> Set s
+enfaStateSet (ENFA ts _ _) = Map.foldr (flip $ Map.foldr Set.union) (Map.keysSet ts) ts
+
+enfaIncreaseStates :: (Ord c, Integral s) => ENFA c s -> s -> ENFA c s
+enfaIncreaseStates (ENFA ts q0 as) n = ENFA ts' (q0 + n) as'
+    where
+    ts' = Map.map (Map.map (Set.map (+n))) $ Map.mapKeysMonotonic (+n) ts
+    as' = Set.map (+n) as
+
+repeat :: (Ord c, Ord s) => ENFA c s -> ENFA c s
+repeat (ENFA ts q0 as) = ENFA ts' q0 (Set.insert q0 as)
+    where
+    -- added transitions between accept states and start
+    ts' = Set.foldr (\a -> Map.insertWith (Map.unionWith Set.union) a (Map.singleton Nothing $ Set.singleton q0)) ts as
+
+append :: (Ord c, Integral s) => ENFA c s -> ENFA c s -> ENFA c s
+append fst@(ENFA ts q0 as) snd = ENFA ts' q0 bs'
+    where
+    (ENFA us' r0' bs') = enfaIncreaseStates snd $ fromIntegral $ Set.size $ enfaStateSet fst
+    -- insert epsilon transitions between accept states of the first enfa, and the start state of the second
+    ts' = Map.union us' $ Set.foldr (\a ts' -> Map.insertWith (Map.unionWith Set.union) a (Map.singleton Nothing $ Set.singleton r0') ts') ts as
+
+alternate :: (Ord c, Integral s) => ENFA c s -> ENFA c s -> ENFA c s
+alternate fst snd = ENFA vs 0 (Set.union as' bs')
+    where
+    (ENFA ts' q0' as') = enfaIncreaseStates fst 1
+    (ENFA us' r0' bs') = enfaIncreaseStates snd $ (+1) $ fromIntegral (Set.size $ enfaStateSet fst)
+    vs = Map.insert 0 (Map.singleton Nothing $ Set.fromList [q0', r0']) $ (Map.union ts' us')
+
+singletonEnfa :: Ord c => c -> ENFA c Int
+singletonEnfa c = ENFA (Map.singleton 0 (Map.singleton c (Set.singleton 1))) 0 (Set.singleton 1)
+
+emptyEnfa = ENFA Map.empty 0 (Set.singleton 0)
 
 main = return ()
