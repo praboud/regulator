@@ -10,7 +10,7 @@ import Data.List (foldr1, intercalate)
 import Data.Char (toUpper, ord, chr)
 
 import Control.Monad (foldM, liftM)
-import Text.ParserCombinators.Parsec
+import Text.ParserCombinators.Parsec hiding (optional)
 import Text.Printf (printf)
 
 {- high level documentation things
@@ -168,21 +168,31 @@ enfaIncreaseStates (ENFA ts q0 as) n = ENFA ts' (q0 + n) as'
     ts' = Map.map (Map.map (Set.map (+n))) $ Map.mapKeysMonotonic (+n) ts
     as' = Set.map (+n) as
 
+addTransition :: (Ord c, Ord s) => (Map s (Map (Maybe c) (Set s))) -> s -> Maybe c -> s -> (Map s (Map (Maybe c) (Set s)))
+addTransition ts q0 c q1 = Map.insertWith (Map.unionWith Set.union) q0 (Map.singleton c $ Set.singleton q1) ts
 
 {- ENFA combinators, used inside parser -}
 
-repeat :: (Ord c, Ord s) => ENFA c s -> ENFA c s
-repeat (ENFA ts q0 as) = ENFA ts' q0 (Set.insert q0 as)
+repeat0 :: (Ord c, Ord s) => ENFA c s -> ENFA c s
+repeat0 e@(ENFA ts q0 as) = ENFA ts' q0 (Set.insert q0 as)
+    where
+    (ENFA ts' _ _) = repeat1 e
+
+repeat1 :: (Ord c, Ord s) => ENFA c s -> ENFA c s
+repeat1 (ENFA ts q0 as) = ENFA ts' q0 as
     where
     -- added transitions between accept states and start
-    ts' = Set.foldr (\a -> Map.insertWith (Map.unionWith Set.union) a (Map.singleton Nothing $ Set.singleton q0)) ts as
+    ts' = Set.foldr (\a acc -> addTransition acc a Nothing q0) ts as
+
+optional :: (Ord c, Ord s) => ENFA c s -> ENFA c s
+optional (ENFA ts q0 as) = ENFA ts q0 (Set.insert q0 as)
 
 append :: (Ord c, Integral s) => ENFA c s -> ENFA c s -> ENFA c s
 append fst@(ENFA ts q0 as) snd = ENFA ts' q0 bs'
     where
     (ENFA us' r0' bs') = enfaIncreaseStates snd $ fromIntegral $ Set.size $ enfaStateSet fst
     -- insert epsilon transitions between accept states of the first enfa, and the start state of the second
-    ts' = Map.union us' $ Set.foldr (\a ts' -> Map.insertWith (Map.unionWith Set.union) a (Map.singleton Nothing $ Set.singleton r0') ts') ts as
+    ts' = Map.union us' $ Set.foldr (\a ts' -> addTransition ts' a Nothing r0') ts as
 
 alternateExtra :: (Ord c, Integral s) => ENFA c s -> ENFA c s -> (s, s, ENFA c s)
 alternateExtra fst snd = (offsetFst, offsetSnd, ENFA vs 0 (Set.union as' bs'))
@@ -226,10 +236,13 @@ regexpParser = liftM (foldr1 alternate) $ sepBy1 regexpTermParser (char '|')
     -- gets postfix operators on regexes
     modifier :: ENFA Char Int -> Parser (ENFA Char Int)
     modifier enfa = do
-        op <- optionMaybe (char '*')
-        return $ case op of
-            Nothing -> enfa
-            Just '*' -> Main.repeat enfa
+        op <- combParser
+        return $ op enfa
+    combParser :: (Ord c, Ord s) => Parser (ENFA c s -> ENFA c s)
+    combParser = (char '*' >> return repeat0)
+                 <|> (char '+' >> return repeat1)
+                 <|> (char '?' >> return optional)
+                 <|> (return id)
 
     regexpTermParser = liftM (foldr1 append) $ many ((parens <|> charClassParser <|> (liftM singletonEnfa $ escapeParser "|()*")) >>= modifier)
 
@@ -276,19 +289,20 @@ compileLexer toks = LexerDFA dfa stateArray
         names' = Set.foldr (\a as -> Map.insert (a + offsetSingle) name as) (Map.mapKeysMonotonic (+offsetAcc) names) $ enfaAccept enfa
 
 {- main io shit -}
-{-main = do
+main = do
     regex <- getLine
     case parse regexpParser "regex" regex of
         Right enfa -> print enfa >> getContents >>= (mapM_ (print . accept dfa) . lines)
             where dfa = compileEnfaToDfa enfa
         Left err -> print err
--}
 
+{-
 main = do
     contents <- getContents
     case parse lexerParser "lexer" contents of
         Right lexer -> print $ compileLexer lexer
         Left err -> print err
+-}
 
 {- general helpers -}
 
