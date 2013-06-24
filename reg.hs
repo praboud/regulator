@@ -6,7 +6,7 @@ import Data.Map (Map)
 import Data.Array (Array, (!), array, bounds, listArray)
 import Data.Ix (Ix, range, inRange)
 import Data.Maybe (fromJust, isJust, fromMaybe, mapMaybe)
-import Data.List (foldr1, intercalate)
+import Data.List (foldr1, intercalate, nub)
 import Data.Char (toUpper, ord, chr)
 
 import Control.Monad (foldM, liftM)
@@ -68,19 +68,30 @@ data ENFA c s = ENFA (Map s (Map (Maybe c) (Set s))) s (Set s) deriving Show
 
 type LexerENFA c s = [(ENFA c s, String)]
 
-data LexerDFA c s = LexerDFA (DFA c s) (Array s String)
+data LexerDFA c s = LexerDFA (DFA c s) (Map s String)
 
 instance Show (LexerDFA Char Int) where
-    show (LexerDFA (DFA ts q0 _) as) = header ++ q0' ++ ts'
+    show (LexerDFA (DFA ts q0 _) as) = header ++ def ++ q0' ++ ts' ++ as' ++ enum ++ footer
         where
         err = -1 :: Int
-        header = printf "#define ST_ERR %d\n" err
+        header = "/* BEGIN GENERATED CODE */"
+        def = printf "#define ST_ERR %d\n" err
         q0' = printf "#define ST_START %d\n" q0
 
-        ts' = (printf "int transitions[%d][%d] {\n" (max_st - min_st + 1) ((ord max_char) - (ord min_char) + 1)) ++ unlines tlines ++ "};\n"
+        ts' = (printf "int transitions[%d][%d] {\n" st_count char_count) ++ unlines tlines ++ "};\n"
         tlines = [intercalate ", " [gettr s c | c <- range (min_char, max_char)] | s <- range (min_st, max_st)]
         gettr s c = show $ fromMaybe err $ if inRange (bounds ts) (s, c) then ts ! (s, c) else Nothing
 
+        as' = (printf "int state_to_type[%d]\n" st_count) ++ unlines alines ++ "};\n"
+        alines = [fromMaybe "TYPE_NIL" (Map.lookup i as) ++ ", " | i <- range (min_st, max_st)]
+
+        enum = "enum type {\n" ++ unlines elines ++ "};\n";
+        elines = [n ++ "," | n <- nub $ Map.elems as]
+
+        footer = "/* END GENERATED CODE */"
+
+        st_count = max_st - min_st + 1 :: Int
+        char_count = 256 :: Int
         ((min_st, _), (max_st, _)) = bounds ts
         min_char = chr 0
         max_char = chr 255
@@ -266,21 +277,16 @@ lexerParser = sepEndBy1
     (char '\n')
 
 compileLexer :: forall c. Ix c => LexerENFA c Int -> LexerDFA c Int
-compileLexer toks = LexerDFA dfa stateArray
+compileLexer toks = LexerDFA dfa $ Map.map getKind codeToState
     where
     (enfa, acceptNames) = foldl combine (emptyEnfa, Map.empty) toks
 
     (dfa, codeToState) = compileEnfaToDfaExtra enfa
 
-    stateArray = funcToArray (0, fst $ Map.findMax codeToState) getKind
-
-    getKind :: Int -> String
-    getKind = maybe "" getKind_h . flip Map.lookup codeToState
-        where
-        getKind_h i = if Set.null filt
-            then "ERR"
-            else (map toUpper . intercalate "_OR_" . Set.toList) filt
-            where filt = setMapMaybe (flip Map.lookup acceptNames) i
+    getKind i = if Set.null filt
+        then "ERR"
+        else (map toUpper . intercalate "_OR_" . Set.toList) filt
+        where filt = setMapMaybe (flip Map.lookup acceptNames) i
 
     combine :: (ENFA c Int, Map Int String) -> (ENFA c Int, String) -> (ENFA c Int, Map Int String)
     combine (enfaAcc, names) (enfa, name) = (enfaAcc', names')
@@ -289,25 +295,22 @@ compileLexer toks = LexerDFA dfa stateArray
         names' = Set.foldr (\a as -> Map.insert (a + offsetSingle) name as) (Map.mapKeysMonotonic (+offsetAcc) names) $ enfaAccept enfa
 
 {- main io shit -}
+{-
 main = do
     regex <- getLine
     case parse regexpParser "regex" regex of
         Right enfa -> print enfa >> getContents >>= (mapM_ (print . accept dfa) . lines)
             where dfa = compileEnfaToDfa enfa
         Left err -> print err
+-}
 
-{-
 main = do
     contents <- getContents
     case parse lexerParser "lexer" contents of
         Right lexer -> print $ compileLexer lexer
         Left err -> print err
--}
 
 {- general helpers -}
-
-funcToArray :: Ix i => (i, i) -> (i -> x) -> Array i x
-funcToArray bound f = listArray bound $ map f $ range bound
 
 setMapMaybe :: (Ord x, Ord y) => (x -> Maybe y) -> Set x -> Set y
 setMapMaybe f = Set.foldr (\x a -> case f x of
