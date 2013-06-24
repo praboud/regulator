@@ -126,14 +126,7 @@ emptyEnfa = ENFA Map.empty 0 (Set.singleton 0)
 regexpParser :: Parser (ENFA Char Int)
 regexpParser = liftM (foldr1 alternate) $ sepBy1 regexpTermParser (char '|')
     where
-    parens = do
-        char '('
-        r <- regexpParser
-        char ')'
-        op <- optionMaybe (char '*')
-        return $ case op of
-            Nothing -> r
-            Just '*' -> Main.repeat r
+    parens = between (char '(') (char ')') regexpParser
     -- parse a character range like [abc], or [a-zA-Z]
     -- alternate between any 1 single character
     charClassParser :: Parser (ENFA Char Int)
@@ -145,7 +138,19 @@ regexpParser = liftM (foldr1 alternate) $ sepBy1 regexpTermParser (char '|')
         hi <- anyChar
         return $ range (lo, hi)
 
-    regexpTermParser = liftM (foldr1 append) $ many (parens <|> charClassParser <|> (liftM singletonEnfa $ noneOf "|()"))
+    -- gets postfix operators on regexes
+    modifier :: ENFA Char Int -> Parser (ENFA Char Int)
+    modifier enfa = do
+        op <- optionMaybe (char '*')
+        return $ case op of
+            Nothing -> enfa
+            Just '*' -> Main.repeat enfa
+
+    regexpTermParser = liftM (foldr1 append) $ many ((parens <|> charClassParser <|> (liftM singletonEnfa $ escapeParser "|()*")) >>= modifier)
+
+escapeParser :: [Char] -> Parser Char
+escapeParser cs = (char esc >> oneOf (esc : cs)) <|> (noneOf cs)
+    where esc = '\\'
 
 main = do
     regex <- getLine
