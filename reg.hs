@@ -6,8 +6,9 @@ import Data.Map (Map)
 import Data.Array (Array, (!), array)
 import Data.Ix (Ix, range)
 import Data.Maybe (fromJust, isJust, fromMaybe, mapMaybe)
+import Data.List (foldr1)
 
-import Control.Monad (foldM)
+import Control.Monad (foldM, liftM)
 import Text.ParserCombinators.Parsec
 
 data DFA c s = DFA (Array (s, c) (Maybe s)) s (Set s) deriving Show
@@ -30,7 +31,6 @@ compileEnfaToDfa (ENFA ts q0 as) = DFA transitionArray (fromJust $ Map.lookup (S
     transitionArray = array arrayBounds $ map (\(s, c) -> ((s, c), Map.lookup s codeToState >>= flip Map.lookup transitions >>= Map.lookup c >>= flip Map.lookup stateToCode)) $ range arrayBounds
     arrayBounds = ((0, minSym), (Map.size transitions - 1, maxSym))
 
-    -- fix me: i won't define codes for stuff which has no transitions coming from it
     stateToCode :: Map (Set s) Int
     stateToCode = foldr (\(qs, i) m -> Map.insert qs i m) Map.empty $ zip states [0..]
     codeToState :: Map Int (Set s)
@@ -112,8 +112,25 @@ alternate fst snd = ENFA vs 0 (Set.union as' bs')
     vs = Map.insert 0 (Map.singleton Nothing $ Set.fromList [q0', r0']) $ (Map.union ts' us')
 
 singletonEnfa :: Ord c => c -> ENFA c Int
-singletonEnfa c = ENFA (Map.singleton 0 (Map.singleton c (Set.singleton 1))) 0 (Set.singleton 1)
+singletonEnfa c = ENFA (Map.singleton 0 (Map.singleton (Just c) (Set.singleton 1))) 0 (Set.singleton 1)
 
 emptyEnfa = ENFA Map.empty 0 (Set.singleton 0)
 
-main = return ()
+regexpParser :: Parser (ENFA Char Int)
+regexpParser = liftM (foldr1 alternate) $ sepBy1 regexpTermParser (char '|')
+    where
+    parens = do
+        char '('
+        r <- regexpParser
+        char ')'
+        op <- optionMaybe (char '*')
+        return $ case op of
+            Nothing -> r
+            Just '*' -> Main.repeat r
+    regexpTermParser = liftM (foldr1 append) $ many (parens <|> (liftM singletonEnfa anyChar))
+
+main = do
+    regex <- getLine
+    case liftM compileEnfaToDfa (parse regexpParser "regex" regex) of
+        Right dfa -> getContents >>= (mapM_ (print . accept dfa) . lines)
+        Left err -> print err
