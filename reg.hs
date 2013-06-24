@@ -113,6 +113,11 @@ alternate fst snd = ENFA vs 0 (Set.union as' bs')
     (ENFA us' r0' bs') = enfaIncreaseStates snd $ (+1) $ fromIntegral (Set.size $ enfaStateSet fst)
     vs = Map.insert 0 (Map.singleton Nothing $ Set.fromList [q0', r0']) $ (Map.union ts' us')
 
+alternateSingle :: (Ord c) => [c] -> ENFA c Int
+alternateSingle cs = ENFA ts 0 (Set.singleton 1)
+    where
+    ts = Map.singleton 0 (foldr (\c a -> Map.insert (Just c) (Set.singleton 1) a) Map.empty cs)
+
 singletonEnfa :: Ord c => c -> ENFA c Int
 singletonEnfa c = ENFA (Map.singleton 0 (Map.singleton (Just c) (Set.singleton 1))) 0 (Set.singleton 1)
 
@@ -129,12 +134,24 @@ regexpParser = liftM (foldr1 alternate) $ sepBy1 regexpTermParser (char '|')
         return $ case op of
             Nothing -> r
             Just '*' -> Main.repeat r
-    regexpTermParser = liftM (foldr1 append) $ many (parens <|> (liftM singletonEnfa $ noneOf "|()"))
+    -- parse a character range like [abc], or [a-zA-Z]
+    -- alternate between any 1 single character
+    charClassParser :: Parser (ENFA Char Int)
+    charClassParser = liftM (alternateSingle . concat) (char '[' >> manyTill (try charRange <|> singleChar) (char ']'))
+    singleChar = liftM (:[]) anyChar
+    charRange = do
+        lo <- anyChar
+        char '-'
+        hi <- anyChar
+        return $ range (lo, hi)
+
+    regexpTermParser = liftM (foldr1 append) $ many (parens <|> charClassParser <|> (liftM singletonEnfa $ noneOf "|()"))
 
 main = do
     regex <- getLine
-    case liftM compileEnfaToDfa (parse regexpParser "regex" regex) of
-        Right dfa -> getContents >>= (mapM_ (print . accept dfa) . lines)
+    case parse regexpParser "regex" regex of
+        Right enfa -> print enfa >> getContents >>= (mapM_ (print . accept dfa) . lines)
+            where dfa = compileEnfaToDfa enfa
         Left err -> print err
 {-
 enfaTransitions (ENFA ts _ _)= ts
