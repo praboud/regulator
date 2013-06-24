@@ -58,7 +58,7 @@ compileEnfaToDfa (ENFA ts q0 as) = DFA transitionArray (fromJust $ Map.lookup (S
 
         neighbours :: Map c (Set s)
         neighbours = Set.foldr (\q m -> Map.unionWith Set.union m $ nonEmptyTransitions q) Map.empty equivalentqs
-        
+
         --Set.foldr Map.union$ Set.map (Set.map (Map.filterWithKey (\k _ -> isJust k) . flip Map.lookup ts) . epsilonClosure ts) qs
 
 epsilonClosure :: (Ord s, Ord c) => (Map s (Map (Maybe c) (Set s))) -> s -> Set s
@@ -72,15 +72,17 @@ epsilonClosure ts = epsilonClosure_h Set.empty
         nbrs' = Set.insert q nbrs
 
 reverseEpsilonClosure :: forall s c. (Ord s, Ord c) => (Map s (Map (Maybe c) (Set s))) -> s -> Set s
-reverseEpsilonClosure ts = reverseEpsilonClosure_h Set.empty
+reverseEpsilonClosure ts q0 = Set.insert q0 $ reverseEpsilonClosure_h Set.empty q0
     where
     reverseEpsilonClosure_h :: (Set s) -> s -> (Set s)
     reverseEpsilonClosure_h sources q
+        -- if we have seen this node before, stop (otherwise, we will encounter a cycle)
         | Set.member q sources = sources
         | otherwise = Set.foldr (flip reverseEpsilonClosure_h) sources' sources'
         where
         sources' :: Set s
-        sources' = Map.foldrWithKey (\state statetrans src -> if fromMaybe False (Map.lookup Nothing statetrans >>= return . Set.member q) then Set.insert state src else src) Set.empty ts
+        -- a set of sources
+        sources' = Map.foldrWithKey (\state statetrans src -> if maybe False (Set.member q) (Map.lookup Nothing statetrans) then Set.insert state src else src) sources ts
 
 enfaStateSet :: (Ord c, Ord s) => ENFA c s -> Set s
 enfaStateSet (ENFA ts _ _) = Map.foldr (flip $ Map.foldr Set.union) (Map.keysSet ts) ts
@@ -129,8 +131,17 @@ regexpParser = liftM (foldr1 alternate) $ sepBy1 regexpTermParser (char '|')
             Just '*' -> Main.repeat r
     regexpTermParser = liftM (foldr1 append) $ many (parens <|> (liftM singletonEnfa anyChar))
 
+-- DEBUG CODE
+{-
 main = do
     regex <- getLine
     case liftM compileEnfaToDfa (parse regexpParser "regex" regex) of
         Right dfa -> getContents >>= (mapM_ (print . accept dfa) . lines)
         Left err -> print err
+-}
+
+enfaTransitions (ENFA ts _ _)= ts
+
+fromRight (Right v) = v
+
+test = fromRight $ parse regexpParser "regex" "aoeu"
