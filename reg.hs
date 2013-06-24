@@ -11,6 +11,55 @@ import Data.List (foldr1)
 import Control.Monad (foldM, liftM)
 import Text.ParserCombinators.Parsec
 
+{- high level documentation things
+ -
+ - the objective is to generate DFA's from regexes (which can then be
+ - used to quickly match regexes in linear time.
+ - in particular, we want to automate the process of creating DFA's for
+ - the lexers of compilers (such as the one I had to write for the
+ - rather excellent CS241 course at the university of waterloo*).
+ - to this end, we want to read in a list of regular expressions which
+ - match to named tokens, and generate an array representing the dfa,
+ - and the lookup table converting valid accept states to each
+ - particular token. the output format should be a pair of c/c++ array
+ - initializers.
+ -
+ - * as a side note, please do not use this to generate a compiler for
+ -   CS241, or any other similar course. you will likely get in trouble
+ -   when you cannot show you authored the code that generated the DFA
+ -}
+
+{- NOTES:
+ - DFA:  deterministic finite automata
+ -       At each state, each character either transitions to exactly 1
+ -       state, or goes to an error state.
+ -       very efficient and simple for the machine to verify whether a
+ -       string is accepted by the DFA. However, writing code that
+ -       stitches together DFA's is prohibitively complicated.
+ -       ENFA's are used for this purpose.
+ -
+ - ENFA: episilon nondeterministic finite automata
+ -       At each state, each character can transition to 0 or more
+ -       states. (implicitly, if the character transitions to 0 state,
+ -       it is said to transition to an error state. in the map, this
+ -       can be represented by the character transitioning to an empty
+ -       set of state, or the character having no transition at all. In
+ -       practice, we should only ever have the second case.)
+ -       A state can also transition to 0 or more state on the empty
+ -       string (called the epsilon transition, represented by a
+ -       transition through Nothing.)
+ -       ENFA's are pretty simple to chain together (the main operations
+ -       being alternation, repetition and concatenation). Therefore,
+ -       we use ENFA's as an intermediate form between regular expressions
+ -       and DFA's.
+ -
+ - ENFA's and DFA's are somewhat written to accomodate any ordinal
+ - type as the state type. in the vast majority of cases, we actually just use the int
+ - type in practice. In some places in the code, I have used int's for convenience.
+ - In the future, I should probably make all of this code generic, or just bite the bullet
+ - and make all of the code require integers. This half-half solution is too confusing.
+ -}
+
 data DFA c s = DFA (Array (s, c) (Maybe s)) s (Set s) deriving Show
 
 accept :: (Ix c, Ix s) => DFA c s -> [c] -> Bool
@@ -20,8 +69,10 @@ accept (DFA ts q0 as) = maybe False (flip Set.member as) . foldM transition q0
 
 data ENFA c s = ENFA (Map s (Map (Maybe c) (Set s))) s (Set s) deriving Show
 
-compileEnfaToDfa :: forall c s. (Ix c, Ix s) => ENFA c s -> DFA c Int
-compileEnfaToDfa (ENFA ts q0 as) = DFA transitionArray (fromJust $ Map.lookup (Set.singleton q0) stateToCode) acceptStates
+compileEnfaToDfa = fst . compileEnfaToDfaExtra
+
+compileEnfaToDfaExtra :: forall c s. (Ix c, Ix s) => ENFA c s -> (DFA c Int, Map (Set s) Int)
+compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray (fromJust $ Map.lookup (Set.singleton q0) stateToCode) acceptStates, stateToCode)
     where
     maxSym = maximum syms
     minSym = minimum syms
@@ -61,6 +112,8 @@ compileEnfaToDfa (ENFA ts q0 as) = DFA transitionArray (fromJust $ Map.lookup (S
 
         --Set.foldr Map.union$ Set.map (Set.map (Map.filterWithKey (\k _ -> isJust k) . flip Map.lookup ts) . epsilonClosure ts) qs
 
+{- ENFA helpers, used by combinators and compiler -}
+
 epsilonClosure :: (Ord s, Ord c) => (Map s (Map (Maybe c) (Set s))) -> s -> Set s
 epsilonClosure ts = epsilonClosure_h Set.empty
     where
@@ -93,6 +146,9 @@ enfaIncreaseStates (ENFA ts q0 as) n = ENFA ts' (q0 + n) as'
     ts' = Map.map (Map.map (Set.map (+n))) $ Map.mapKeysMonotonic (+n) ts
     as' = Set.map (+n) as
 
+
+{- ENFA combinators, used inside parser -}
+
 repeat :: (Ord c, Ord s) => ENFA c s -> ENFA c s
 repeat (ENFA ts q0 as) = ENFA ts' q0 (Set.insert q0 as)
     where
@@ -122,6 +178,9 @@ singletonEnfa :: Ord c => c -> ENFA c Int
 singletonEnfa c = ENFA (Map.singleton 0 (Map.singleton (Just c) (Set.singleton 1))) 0 (Set.singleton 1)
 
 emptyEnfa = ENFA Map.empty 0 (Set.singleton 0)
+
+
+{- parser related things, turn string/regex into ENFA -}
 
 regexpParser :: Parser (ENFA Char Int)
 regexpParser = liftM (foldr1 alternate) $ sepBy1 regexpTermParser (char '|')
