@@ -42,7 +42,7 @@ compileEnfaToDfa (ENFA ts q0 as) = DFA transitionArray (fromJust $ Map.lookup (S
     acceptStates :: Set Int
     acceptStates = Set.foldr (\a ac -> Set.union ac $ Set.fromList $ Map.elems $ Map.filterWithKey (\k _ -> overlap k $ reverseEpsilonClosure ts a) stateToCode) Set.empty as
     overlap :: Set s -> Set s -> Bool
-    overlap x y = Set.null $ Set.intersection x y
+    overlap x y = not $ Set.null $ Set.intersection x y
 
     buildTransitions :: (Map (Set s) (Map c (Set s))) -> (Set s) -> (Map (Set s) (Map c (Set s)))
     buildTransitions ts' qs
@@ -131,17 +131,15 @@ regexpParser = liftM (foldr1 alternate) $ sepBy1 regexpTermParser (char '|')
             Just '*' -> Main.repeat r
     regexpTermParser = liftM (foldr1 append) $ many (parens <|> (liftM singletonEnfa anyChar))
 
--- DEBUG CODE
-{-
 main = do
     regex <- getLine
     case liftM compileEnfaToDfa (parse regexpParser "regex" regex) of
         Right dfa -> getContents >>= (mapM_ (print . accept dfa) . lines)
         Left err -> print err
--}
-
+{-
 enfaTransitions (ENFA ts _ _)= ts
 
 fromRight (Right v) = v
 
 test = fromRight $ parse regexpParser "regex" "aoeu"
+-}
