@@ -129,7 +129,7 @@ regexpParser = liftM (foldr1 alternate) $ sepBy1 regexpTermParser (char '|')
         return $ case op of
             Nothing -> r
             Just '*' -> Main.repeat r
-    regexpTermParser = liftM (foldr1 append) $ many (parens <|> (liftM singletonEnfa anyChar))
+    regexpTermParser = liftM (foldr1 append) $ many (parens <|> (liftM singletonEnfa $ noneOf "|()"))
 
 main = do
     regex <- getLine
@@ -141,5 +141,5 @@ enfaTransitions (ENFA ts _ _)= ts
 
 fromRight (Right v) = v
 
-test = fromRight $ parse regexpParser "regex" "aoeu"
+test = fromRight $ parse regexpParser "regex" "aoeu|asdf"
 -}
