@@ -3,8 +3,8 @@ import Data.Set (Set)
 import qualified Data.Map as Map
 import Data.Map (Map)
 
-import Data.Array (Array, (!), array)
-import Data.Ix (Ix, range)
+import Data.Array (Array, (!), array, bounds)
+import Data.Ix (Ix, range, inRange)
 import Data.Maybe (fromJust, isJust, fromMaybe, mapMaybe)
 import Data.List (foldr1)
 
@@ -16,7 +16,7 @@ data DFA c s = DFA (Array (s, c) (Maybe s)) s (Set s) deriving Show
 accept :: (Ix c, Ix s) => DFA c s -> [c] -> Bool
 accept (DFA ts q0 as) = maybe False (flip Set.member as) . foldM transition q0
     where
-    transition q c = ts ! (q, c)
+    transition q c = if inRange (bounds ts) (q, c) then ts ! (q, c) else Nothing
 
 data ENFA c s = ENFA (Map s (Map (Maybe c) (Set s))) s (Set s) deriving Show
 
