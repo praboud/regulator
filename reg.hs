@@ -6,10 +6,12 @@ import Data.Map (Map)
 import Data.Array (Array, (!), array, bounds, listArray)
 import Data.Ix (Ix, range, inRange)
 import Data.Maybe (fromJust, isJust, fromMaybe, mapMaybe)
-import Data.List (foldr1)
+import Data.List (foldr1, intercalate)
+import Data.Char (toUpper, ord, chr)
 
 import Control.Monad (foldM, liftM)
 import Text.ParserCombinators.Parsec
+import Text.Printf (printf)
 
 {- high level documentation things
  -
@@ -68,14 +70,30 @@ type LexerENFA c s = [(ENFA c s, String)]
 
 data LexerDFA c s = LexerDFA (DFA c s) (Array s String)
 
+instance Show (LexerDFA Char Int) where
+    show (LexerDFA (DFA ts q0 _) as) = header ++ q0' ++ ts'
+        where
+        err = -1 :: Int
+        header = printf "#define ST_ERR %d\n" err
+        q0' = printf "#define ST_START %d\n" q0
+
+        ts' = (printf "int transitions[%d][%d] {\n" (max_st - min_st + 1) ((ord max_char) - (ord min_char) + 1)) ++ unlines tlines ++ "};\n"
+        tlines = [intercalate ", " [gettr s c | c <- range (min_char, max_char)] | s <- range (min_st, max_st)]
+        gettr s c = show $ fromMaybe err $ if inRange (bounds ts) (s, c) then ts ! (s, c) else Nothing
+
+        ((min_st, _), (max_st, _)) = bounds ts
+        min_char = chr 0
+        max_char = chr 255
+
 accept :: (Ix c, Ix s) => DFA c s -> [c] -> Bool
 accept (DFA ts q0 as) = maybe False (flip Set.member as) . foldM transition q0
     where
     transition q c = if inRange (bounds ts) (q, c) then ts ! (q, c) else Nothing
 
+compileEnfaToDfa :: (Ix c, Ord s) => ENFA c s -> DFA c Int
 compileEnfaToDfa = fst . compileEnfaToDfaExtra
 
-compileEnfaToDfaExtra :: forall c s. (Ix c, Ix s) => ENFA c s -> (DFA c Int, Map Int (Set s))
+compileEnfaToDfaExtra :: forall c s. (Ix c, Ord s) => ENFA c s -> (DFA c Int, Map Int (Set s))
 compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray (fromJust $ Map.lookup (Set.singleton q0) stateToCode) acceptStates, codeToState)
     where
     maxSym = maximum syms
@@ -225,12 +243,14 @@ escapeParser cs = (char esc >> oneOf (esc : cs)) <|> (noneOf ('\n' : cs))
 
 {- things dealing with language lexers -}
 
-parseLexer :: Parser (LexerENFA Char Int)
-parseLexer = many (do
-    name <- many1 alphaNum
-    skipMany1 space
-    enfa <- regexpParser
-    return (enfa, name))
+lexerParser :: Parser (LexerENFA Char Int)
+lexerParser = sepEndBy1
+    (do
+        name <- many1 alphaNum
+        skipMany1 space
+        enfa <- regexpParser
+        return (enfa, name))
+    (char '\n')
 
 compileLexer :: forall c. Ix c => LexerENFA c Int -> LexerDFA c Int
 compileLexer toks = LexerDFA dfa stateArray
@@ -242,7 +262,12 @@ compileLexer toks = LexerDFA dfa stateArray
     stateArray = funcToArray (0, fst $ Map.findMax codeToState) getKind
 
     getKind :: Int -> String
-    getKind = maybe "" (Set.foldr (\i a -> a ++ (fromJust $ Map.lookup i acceptNames)) "") . flip Map.lookup codeToState
+    getKind = maybe "" getKind_h . flip Map.lookup codeToState
+        where
+        getKind_h i = if Set.null filt
+            then "ERR"
+            else (map toUpper . intercalate "_OR_" . Set.toList) filt
+            where filt = setMapMaybe (flip Map.lookup acceptNames) i
 
     combine :: (ENFA c Int, Map Int String) -> (ENFA c Int, String) -> (ENFA c Int, Map Int String)
     combine (enfaAcc, names) (enfa, name) = (enfaAcc', names')
@@ -251,17 +276,29 @@ compileLexer toks = LexerDFA dfa stateArray
         names' = Set.foldr (\a as -> Map.insert (a + offsetSingle) name as) (Map.mapKeysMonotonic (+offsetAcc) names) $ enfaAccept enfa
 
 {- main io shit -}
-main = do
+{-main = do
     regex <- getLine
     case parse regexpParser "regex" regex of
         Right enfa -> print enfa >> getContents >>= (mapM_ (print . accept dfa) . lines)
             where dfa = compileEnfaToDfa enfa
+        Left err -> print err
+-}
+
+main = do
+    contents <- getContents
+    case parse lexerParser "lexer" contents of
+        Right lexer -> print $ compileLexer lexer
         Left err -> print err
 
 {- general helpers -}
 
 funcToArray :: Ix i => (i, i) -> (i -> x) -> Array i x
 funcToArray bound f = listArray bound $ map f $ range bound
+
+setMapMaybe :: (Ord x, Ord y) => (x -> Maybe y) -> Set x -> Set y
+setMapMaybe f = Set.foldr (\x a -> case f x of
+    Nothing -> a
+    Just y  -> Set.insert y a) Set.empty
 
 enfaTransitions (ENFA ts _ _) = ts
 enfaAccept (ENFA _ _ as) = as
