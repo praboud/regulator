@@ -71,7 +71,7 @@ type LexerENFA c s = [(ENFA c s, String)]
 data LexerDFA c s = LexerDFA (DFA c s) (Map s String)
 
 instance Show (LexerDFA Char Int) where
-    show (LexerDFA (DFA ts q0 _) as) = header ++ def ++ q0' ++ ts' ++ as' ++ enum ++ footer
+    show (LexerDFA (DFA ts q0 _) as) = header ++ def ++ q0' ++ "\n" ++ ts' ++ "\n" ++ as' ++ "\n" ++ enum ++ footer
         where
         err = -1 :: Int
         header = "/* BEGIN GENERATED CODE */"
@@ -82,7 +82,7 @@ instance Show (LexerDFA Char Int) where
         tlines = [intercalate ", " [gettr s c | c <- range (min_char, max_char)] | s <- range (min_st, max_st)]
         gettr s c = show $ fromMaybe err $ if inRange (bounds ts) (s, c) then ts ! (s, c) else Nothing
 
-        as' = (printf "int state_to_type[%d]\n" st_count) ++ unlines alines ++ "};\n"
+        as' = (printf "int state_to_type[%d] {\n" st_count) ++ unlines alines ++ "};\n"
         alines = [fromMaybe "TYPE_NIL" (Map.lookup i as) ++ ", " | i <- range (min_st, max_st)]
 
         enum = "enum type {\n" ++ unlines elines ++ "};\n";
@@ -255,7 +255,7 @@ regexpParser = liftM (foldr1 alternate) $ sepBy1 regexpTermParser (char '|')
                  <|> (char '?' >> return optional)
                  <|> (return id)
 
-    regexpTermParser = liftM (foldr1 append) $ many ((parens <|> charClassParser <|> (liftM singletonEnfa $ escapeParser "|()*")) >>= modifier)
+    regexpTermParser = liftM (foldr1 append) $ many ((try parens <|> try charClassParser <|> (liftM singletonEnfa $ escapeParser "|()[]+?*")) >>= modifier)
 
 escapeParser :: [Char] -> Parser Char
 -- parses any character, except unescaped versions of any character in
@@ -307,7 +307,7 @@ main = do
 main = do
     contents <- getContents
     case parse lexerParser "lexer" contents of
-        Right lexer -> print $ compileLexer lexer
+        Right lexer -> print lexer >> print (compileLexer lexer)
         Left err -> print err
 
 {- general helpers -}
