@@ -3,7 +3,7 @@ import Data.Set (Set)
 import qualified Data.Map as Map
 import Data.Map (Map)
 
-import Data.Array (Array, (!), array, bounds)
+import Data.Array (Array, (!), array, bounds, listArray)
 import Data.Ix (Ix, range, inRange)
 import Data.Maybe (fromJust, isJust, fromMaybe, mapMaybe)
 import Data.List (foldr1)
@@ -62,17 +62,21 @@ import Text.ParserCombinators.Parsec
 
 data DFA c s = DFA (Array (s, c) (Maybe s)) s (Set s) deriving Show
 
+data ENFA c s = ENFA (Map s (Map (Maybe c) (Set s))) s (Set s) deriving Show
+
+type LexerENFA c s = [(ENFA c s, String)]
+
+data LexerDFA c s = LexerDFA (DFA c s) (Array s String)
+
 accept :: (Ix c, Ix s) => DFA c s -> [c] -> Bool
 accept (DFA ts q0 as) = maybe False (flip Set.member as) . foldM transition q0
     where
     transition q c = if inRange (bounds ts) (q, c) then ts ! (q, c) else Nothing
 
-data ENFA c s = ENFA (Map s (Map (Maybe c) (Set s))) s (Set s) deriving Show
-
 compileEnfaToDfa = fst . compileEnfaToDfaExtra
 
-compileEnfaToDfaExtra :: forall c s. (Ix c, Ix s) => ENFA c s -> (DFA c Int, Map (Set s) Int)
-compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray (fromJust $ Map.lookup (Set.singleton q0) stateToCode) acceptStates, stateToCode)
+compileEnfaToDfaExtra :: forall c s. (Ix c, Ix s) => ENFA c s -> (DFA c Int, Map Int (Set s))
+compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray (fromJust $ Map.lookup (Set.singleton q0) stateToCode) acceptStates, codeToState)
     where
     maxSym = maximum syms
     minSym = minimum syms
@@ -162,12 +166,16 @@ append fst@(ENFA ts q0 as) snd = ENFA ts' q0 bs'
     -- insert epsilon transitions between accept states of the first enfa, and the start state of the second
     ts' = Map.union us' $ Set.foldr (\a ts' -> Map.insertWith (Map.unionWith Set.union) a (Map.singleton Nothing $ Set.singleton r0') ts') ts as
 
-alternate :: (Ord c, Integral s) => ENFA c s -> ENFA c s -> ENFA c s
-alternate fst snd = ENFA vs 0 (Set.union as' bs')
+alternateExtra :: (Ord c, Integral s) => ENFA c s -> ENFA c s -> (s, s, ENFA c s)
+alternateExtra fst snd = (offsetFst, offsetSnd, ENFA vs 0 (Set.union as' bs'))
     where
-    (ENFA ts' q0' as') = enfaIncreaseStates fst 1
-    (ENFA us' r0' bs') = enfaIncreaseStates snd $ (+1) $ fromIntegral (Set.size $ enfaStateSet fst)
+    offsetFst = 1
+    offsetSnd = (+1) $ fromIntegral (Set.size $ enfaStateSet fst)
+    (ENFA ts' q0' as') = enfaIncreaseStates fst offsetFst
+    (ENFA us' r0' bs') = enfaIncreaseStates snd offsetSnd
     vs = Map.insert 0 (Map.singleton Nothing $ Set.fromList [q0', r0']) $ (Map.union ts' us')
+
+alternate a b = (\(_,_,x) -> x) $ alternateExtra a b
 
 alternateSingle :: (Ord c) => [c] -> ENFA c Int
 alternateSingle cs = ENFA ts 0 (Set.singleton 1)
@@ -208,18 +216,57 @@ regexpParser = liftM (foldr1 alternate) $ sepBy1 regexpTermParser (char '|')
     regexpTermParser = liftM (foldr1 append) $ many ((parens <|> charClassParser <|> (liftM singletonEnfa $ escapeParser "|()*")) >>= modifier)
 
 escapeParser :: [Char] -> Parser Char
-escapeParser cs = (char esc >> oneOf (esc : cs)) <|> (noneOf cs)
+-- parses any character, except unescaped versions of any character in
+-- the list provided
+-- nb: we never allow newlines
+-- should probably extend this to any non-printable
+escapeParser cs = (char esc >> oneOf (esc : cs)) <|> (noneOf ('\n' : cs))
     where esc = '\\'
 
+{- things dealing with language lexers -}
+
+parseLexer :: Parser (LexerENFA Char Int)
+parseLexer = many (do
+    name <- many1 alphaNum
+    skipMany1 space
+    enfa <- regexpParser
+    return (enfa, name))
+
+compileLexer :: forall c. Ix c => LexerENFA c Int -> LexerDFA c Int
+compileLexer toks = LexerDFA dfa stateArray
+    where
+    (enfa, acceptNames) = foldl combine (emptyEnfa, Map.empty) toks
+
+    (dfa, codeToState) = compileEnfaToDfaExtra enfa
+
+    stateArray = funcToArray (0, fst $ Map.findMax codeToState) getKind
+
+    getKind :: Int -> String
+    getKind = maybe "" (Set.foldr (\i a -> a ++ (fromJust $ Map.lookup i acceptNames)) "") . flip Map.lookup codeToState
+
+    combine :: (ENFA c Int, Map Int String) -> (ENFA c Int, String) -> (ENFA c Int, Map Int String)
+    combine (enfaAcc, names) (enfa, name) = (enfaAcc', names')
+        where
+        (offsetAcc, offsetSingle, enfaAcc') = alternateExtra enfaAcc enfa
+        names' = Set.foldr (\a as -> Map.insert (a + offsetSingle) name as) (Map.mapKeysMonotonic (+offsetAcc) names) $ enfaAccept enfa
+
+{- main io shit -}
 main = do
     regex <- getLine
     case parse regexpParser "regex" regex of
         Right enfa -> print enfa >> getContents >>= (mapM_ (print . accept dfa) . lines)
             where dfa = compileEnfaToDfa enfa
         Left err -> print err
-{-
-enfaTransitions (ENFA ts _ _)= ts
 
+{- general helpers -}
+
+funcToArray :: Ix i => (i, i) -> (i -> x) -> Array i x
+funcToArray bound f = listArray bound $ map f $ range bound
+
+enfaTransitions (ENFA ts _ _) = ts
+enfaAccept (ENFA _ _ as) = as
+
+{-
 fromRight (Right v) = v
 
 test = fromRight $ parse regexpParser "regex" "aoeu|asdf"
