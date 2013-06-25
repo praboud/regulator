@@ -1,3 +1,4 @@
-reg
-reg.hi
-reg.o
+*.hi
+*.o
+genLex
+match

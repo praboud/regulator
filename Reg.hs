@@ -1,3 +1,16 @@
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE FlexibleInstances #-}
+
+module Reg
+    ( regexpParser
+    , lexerParser
+    , compileEnfaToDfa
+    , compileLexer
+    , accept
+    ) where
+
+
 import qualified Data.Set as Set
 import Data.Set (Set)
 import qualified Data.Map as Map
@@ -293,22 +306,6 @@ compileLexer toks = LexerDFA dfa $ Map.map getKind codeToState
         where
         (offsetAcc, offsetSingle, enfaAcc') = alternateExtra enfaAcc enfa
         names' = Set.foldr (\a as -> Map.insert (a + offsetSingle) name as) (Map.mapKeysMonotonic (+offsetAcc) names) $ enfaAccept enfa
-
-{- main io shit -}
-{-
-main = do
-    regex <- getLine
-    case parse regexpParser "regex" regex of
-        Right enfa -> print enfa >> getContents >>= (mapM_ (print . accept dfa) . lines)
-            where dfa = compileEnfaToDfa enfa
-        Left err -> print err
--}
-
-main = do
-    contents <- getContents
-    case parse lexerParser "lexer" contents of
-        Right lexer -> print lexer >> print (compileLexer lexer)
-        Left err -> print err
 
 {- general helpers -}
 
