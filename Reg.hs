@@ -252,13 +252,24 @@ regexpParser = liftM (foldr1 alternate) $ sepBy1 regexpTermParser (char '|')
     -- parse a character range like [abc], or [a-zA-Z]
     -- alternate between any 1 single character
     charClassParser :: Parser (ENFA Char Int)
-    charClassParser = liftM (alternateSingle . concat) (char '[' >> manyTill (try charRange <|> singleChar) (char ']'))
-    singleChar = liftM (:[]) anyChar
+    charClassParser = do
+        char '['
+        negate <- optionMaybe $ char '^'
+        cs <- liftM concat $ manyTill (try charRange <|> builtInRanges <|> singleChar) (char ']')
+        return $ alternateSingle $ case negate of
+            Nothing -> cs
+            Just _  -> [x | x <- range (chr 0, chr 255), not $ Set.member x cs']
+                where
+                cs' = Set.fromList cs
+    singleChar = liftM (:[]) $ escapeParser "[]"
     charRange = do
         lo <- anyChar
         char '-'
         hi <- anyChar
         return $ range (lo, hi)
+    builtInRanges = charCode [('n',"\n"), ('t',"\t"), ('w', wordChars), ('s', spaceChars), ('d', digitChars)]
+    charCode cs = char '\\' >> choice [char c >> return x | (c, x) <- cs]
+    dot = char '.' >> return (range (chr 0, chr 255))
 
     -- gets postfix operators on regexes
     modifier :: ENFA Char Int -> Parser (ENFA Char Int)
@@ -271,7 +282,16 @@ regexpParser = liftM (foldr1 alternate) $ sepBy1 regexpTermParser (char '|')
                  <|> (char '?' >> return optional)
                  <|> (return id)
 
-    regexpTermParser = liftM (foldr1 append) $ many ((try parens <|> try charClassParser <|> (liftM singletonEnfa $ escapeParser "|()[]+?*")) >>= modifier)
+    regexpTermParser = liftM (foldr1 append) $ many (
+            (try parens
+             <|> try charClassParser
+             <|> try (liftM alternateSingle (builtInRanges <|> dot))
+             <|> (liftM singletonEnfa $ escapeParser "|()[]+?*.")
+            ) >>= modifier)
+
+spaceChars = " \t\n"
+digitChars = "0123456789"
+wordChars  = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 escapeParser :: [Char] -> Parser Char
 -- parses any character, except unescaped versions of any character in
