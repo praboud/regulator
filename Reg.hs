@@ -84,19 +84,22 @@ type LexerENFA c s = [(ENFA c s, String)]
 data LexerDFA c s = LexerDFA (DFA c s) (Map s String)
 
 instance Show (LexerDFA Char Int) where
-    show (LexerDFA (DFA ts q0 _) as) = header ++ def ++ q0' ++ "\n" ++ ts' ++ "\n" ++ as' ++ "\n" ++ enum ++ footer
+    show (LexerDFA (DFA ts q0 _) as) = header ++ def ++ q0' ++ "\n" ++ ts' ++ "\n" ++ enum ++ "\n" ++ enum_to_string ++ "\n" ++ as' ++ footer
         where
         err = -1 :: Int
-        header = "/* BEGIN GENERATED CODE */"
+        header = "/* BEGIN GENERATED CODE */\n"
         def = printf "#define ST_ERR %d\n" err
         q0' = printf "#define ST_START %d\n" q0
 
-        ts' = (printf "int transitions[%d][%d] {\n" st_count char_count) ++ unlines tlines ++ "};\n"
+        ts' = (printf "int transitions[%d][%d] = {\n" st_count char_count) ++ unlines tlines ++ "};\n"
         tlines = [intercalate ", " [gettr s c | c <- range (min_char, max_char)] | s <- range (min_st, max_st)]
         gettr s c = show $ fromMaybe err $ if inRange (bounds ts) (s, c) then ts ! (s, c) else Nothing
 
         as' = (printf "int state_to_type[%d] {\n" st_count) ++ unlines alines ++ "};\n"
         alines = [fromMaybe "TYPE_NIL" (Map.lookup i as) ++ ", " | i <- range (min_st, max_st)]
+
+        enum_to_string = "string type_to_string = {\n" ++ unlines slines ++ "};\n";
+        slines = ['"' : n ++ "\"," | n <- nub $ Map.elems as]
 
         enum = "enum type {\n" ++ unlines elines ++ "};\n";
         elines = [n ++ "," | n <- nub $ Map.elems as]
