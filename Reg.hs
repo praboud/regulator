@@ -91,18 +91,18 @@ instance Show (LexerDFA Char Int) where
         def = printf "#define ST_ERR %d\n" err
         q0' = printf "#define ST_START %d\n" q0
 
-        ts' = (printf "int transitions[%d][%d] = {\n" st_count char_count) ++ unlines tlines ++ "};\n"
-        tlines = [intercalate ", " [gettr s c | c <- range (min_char, max_char)] | s <- range (min_st, max_st)]
+        ts' = (printf "int transitions[][%d] = {\n" char_count) ++ intercalate ",\n" tlines ++ "};\n"
+        tlines = [('{':) $ (++"}") $ intercalate ", " [gettr s c | c <- range (min_char, max_char)] | s <- range (min_st, max_st)]
         gettr s c = show $ fromMaybe err $ if inRange (bounds ts) (s, c) then ts ! (s, c) else Nothing
 
-        as' = (printf "int state_to_type[%d] {\n" st_count) ++ unlines alines ++ "};\n"
-        alines = [fromMaybe "TYPE_NIL" (Map.lookup i as) ++ ", " | i <- range (min_st, max_st)]
+        as' = "enum type state_to_type[] = {\n" ++ unlines alines ++ "};\n"
+        alines = ["TP_" ++ fromJust (Map.lookup i as) ++ ", " | i <- range (min_st, max_st)]
 
-        enum_to_string = "string type_to_string = {\n" ++ unlines slines ++ "};\n";
+        enum_to_string = "string type_to_string[] = {\n" ++ unlines slines ++ "};\n";
         slines = ['"' : n ++ "\"," | n <- nub $ Map.elems as]
 
         enum = "enum type {\n" ++ unlines elines ++ "};\n";
-        elines = [n ++ "," | n <- nub $ Map.elems as]
+        elines = ["TP_" ++ n ++ "," | n <- nub $ Map.elems as]
 
         footer = "/* END GENERATED CODE */"
 
@@ -320,7 +320,7 @@ compileLexer toks = LexerDFA dfa $ Map.map getKind codeToState
     (dfa, codeToState) = compileEnfaToDfaExtra enfa
 
     getKind i = if Set.null filt
-        then "ERR"
+        then "NIL"
         else (map toUpper . intercalate "_OR_" . Set.toList) filt
         where filt = setMapMaybe (flip Map.lookup acceptNames) i
 
