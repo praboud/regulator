@@ -8,6 +8,8 @@ module Reg
     , compileEnfaToDfa
     , compileLexer
     , accept
+    , acceptExtra
+    , LexerDFA(LexerDFA)
     ) where
 
 
@@ -22,9 +24,11 @@ import Data.Maybe (fromJust, isJust, fromMaybe, mapMaybe)
 import Data.List (foldr1, intercalate, nub)
 import Data.Char (toUpper, ord, chr)
 
-import Control.Monad (foldM, liftM)
+import Control.Monad (foldM, liftM, (>=>))
 import Text.ParserCombinators.Parsec hiding (optional)
 import Text.Printf (printf)
+
+import Debug.Trace
 
 {- high level documentation things
  -
@@ -113,7 +117,10 @@ instance Show (LexerDFA Char Int) where
         max_char = chr 255
 
 accept :: (Ix c, Ix s) => DFA c s -> [c] -> Bool
-accept (DFA ts q0 as) = maybe False (flip Set.member as) . foldM transition q0
+accept dfa = isJust . acceptExtra dfa
+
+acceptExtra :: (Ix c, Ix s) => DFA c s -> [c] -> Maybe s
+acceptExtra (DFA ts q0 as) = foldM transition q0 >=> (\q -> if Set.member q as then Just q else Nothing)
     where
     transition q c = if inRange (bounds ts) (q, c) then ts ! (q, c) else Nothing
 
@@ -192,8 +199,8 @@ enfaStateSet (ENFA ts _ _) = Map.foldr (flip $ Map.foldr Set.union) (Map.keysSet
 enfaIncreaseStates :: (Ord c, Integral s) => ENFA c s -> s -> ENFA c s
 enfaIncreaseStates (ENFA ts q0 as) n = ENFA ts' (q0 + n) as'
     where
-    ts' = Map.map (Map.map (Set.map (+n))) $ Map.mapKeysMonotonic (+n) ts
-    as' = Set.map (+n) as
+    ts' = Map.map (Map.map (Set.mapMonotonic (+n))) $ Map.mapKeysMonotonic (+n) ts
+    as' = Set.mapMonotonic (+n) as
 
 addTransition :: (Ord c, Ord s) => (Map s (Map (Maybe c) (Set s))) -> s -> Maybe c -> s -> (Map s (Map (Maybe c) (Set s)))
 addTransition ts q0 c q1 = Map.insertWith (Map.unionWith Set.union) q0 (Map.singleton c $ Set.singleton q1) ts
@@ -315,7 +322,7 @@ lexerParser = sepEndBy1
 compileLexer :: forall c. Ix c => LexerENFA c Int -> LexerDFA c Int
 compileLexer toks = LexerDFA dfa $ Map.map getKind codeToState
     where
-    (enfa, acceptNames) = foldl combine (emptyEnfa, Map.empty) toks
+    (enfa, acceptNames) = foldl combine (ENFA Map.empty 0 Set.empty, Map.empty) toks
 
     (dfa, codeToState) = compileEnfaToDfaExtra enfa
 
