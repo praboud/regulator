@@ -319,17 +319,24 @@ lexerParser = sepEndBy1
         return (enfa, name))
     (char '\n')
 
-compileLexer :: forall c. Ix c => LexerENFA c Int -> LexerDFA c Int
+compileLexer :: forall c. (Show c, Ix c) => LexerENFA c Int -> LexerDFA c Int
+-- compileLexer toks = trace ((unlines $ map show toks) ++ show enfa ++ "\n" ++ show acceptNames ++ "\n" ++ show codeToState) $ LexerDFA dfa $ Map.map getKind codeToState
 compileLexer toks = LexerDFA dfa $ Map.map getKind codeToState
     where
     (enfa, acceptNames) = foldl combine (ENFA Map.empty 0 Set.empty, Map.empty) toks
+    (ENFA ts _ _) = enfa
 
     (dfa, codeToState) = compileEnfaToDfaExtra enfa
 
-    getKind i = if Set.null filt
+    -- maps a set of enfa states (whose combination of states now represents
+    -- a single dfa state) to a set of strings
+    getKind :: Set Int -> String
+    getKind qs = if Set.null filt
         then "NIL"
         else (map toUpper . intercalate "_OR_" . Set.toList) filt
-        where filt = setMapMaybe (flip Map.lookup acceptNames) i
+        where
+        filt = setMapMaybe (flip Map.lookup acceptNames) qs'
+        qs' = Set.foldr (\q qs' -> Set.union qs' $ epsilonClosure ts q) Set.empty qs
 
     combine :: (ENFA c Int, Map Int String) -> (ENFA c Int, String) -> (ENFA c Int, Map Int String)
     combine (enfaAcc, names) (enfa, name) = (enfaAcc', names')
