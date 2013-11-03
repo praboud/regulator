@@ -88,7 +88,10 @@ type LexerENFA c s = [(ENFA c s, String)]
 
 data LexerDFA c s = LexerDFA (DFA c s) (Map s String)
 
-data Token c s = Token s [c] deriving Show
+data Token c s = Token s [c]
+
+instance Show (Token Char String) where
+    show (Token name lexeme) = name ++ ": '" ++ lexeme ++ "'"
 
 instance Show (LexerDFA Char Int) where
     show (LexerDFA (DFA ts q0 _) as) = header ++ def ++ q0' ++ "\n" ++ ts' ++ "\n" ++ enum ++ "\n" ++ enum_to_string ++ "\n" ++ as' ++ footer
