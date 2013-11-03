@@ -1,0 +1,7 @@
+NUM 0|[1-9][0-9]*
+LPAREN \(
+RPAREN \)
+PLUS \+
+MINUS -
+STAR \*
+SLASH /
