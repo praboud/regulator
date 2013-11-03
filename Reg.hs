@@ -78,7 +78,11 @@ type Symbol = Char
 
 data DFA = DFA (Array (State, Symbol) (Maybe State)) State (Set State) deriving Show
 
+type DFAMap = Map (Set State) (Map Symbol (Set State))
+
 data ENFA = ENFA (Map State (Map (Maybe Symbol) (Set State))) State (Set State) deriving Show
+
+type ENFAMap = Map State (Map (Maybe Symbol) (Set State))
 
 type LexerENFA = [(ENFA, String)]
 
@@ -89,14 +93,25 @@ data Token x = Token x [Symbol]
 instance Show (Token String) where
     show (Token name lexeme) = name ++ ": '" ++ lexeme ++ "'"
 
+{- is a string accepted by the regex defined by the dfa?
+ - if so, return Just the state that the DFA terminates in
+ - otherwise, return nothing
+ -}
 accept :: DFA -> [Symbol] -> Maybe State
 accept (DFA ts q0 as) = foldM transition q0 >=> (\q -> if Set.member q as then Just q else Nothing)
     where
     transition q c = if inRange (bounds ts) (q, c) then ts ! (q, c) else Nothing
 
+{- essentially the same idea as below, but assign meaningful names to the
+ - tokens
+ -}
 lexerTokenize :: LexerDFA -> [Symbol] -> Either String [Token String]
 lexerTokenize (LexerDFA dfa names) cs = fmap (map (\(Token q s) -> Token (names Map.! q) s)) $ tokenize dfa cs
 
+{- break the entire input string into tokens which are in the language of
+ - the provided DFA, or return an error message if the string does not fit
+ - that language
+ -}
 tokenize :: DFA -> [Symbol] -> Either String [Token Int]
 tokenize (DFA ts q0 as) cs = tok_h [] q0 cs
     where
@@ -117,46 +132,68 @@ tokenize (DFA ts q0 as) cs = tok_h [] q0 cs
 compileEnfaToDfa :: ENFA -> DFA
 compileEnfaToDfa = fst . compileEnfaToDfaExtra
 
--- for clarity
---type DFAState = State
---type ENFAState = State
 
+-- for clarity
+type ENFAState = State
+type DFAState = State
+{-
+ - take an epsilon-NFA and turn it into the equivalent DFA, as well as
+ - returning some diagnostic information - a map of DFA states to sets
+ - of ENFA states (this helps work out what the final states actually mean,
+ - and what final state indicates what token)
+ -
+ - this function is rather complicated, and you should probably know the ins
+ - and outs of ENFAs and DFAs before looking at this
+ -}
 compileEnfaToDfaExtra :: ENFA -> (DFA, Map Int (Set State))
 compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray (fromJust $ Map.lookup (Set.singleton q0) stateToCode) acceptStates, codeToState)
     where
 
-    maxSym = maximum syms
-    minSym = minimum syms
+    -- get a list of all symbols in use
     syms = concat $ map (mapMaybe id . Map.keys) $ Map.elems ts
 
-    transitionArray :: Array (State, Symbol) (Maybe State)
-    transitionArray = array arrayBounds $ map (\(s, c) -> ((s, c), Map.lookup s codeToState >>= flip Map.lookup transitions >>= Map.lookup c >>= flip Map.lookup stateToCode)) $ range arrayBounds
+    -- get bounds on those symbols
+    maxSym = maximum syms
+    minSym = minimum syms
+
+    -- build up the actual 2D array which defines, given the current state
+    -- and symbol seen by the matching process, which symbol to go to next
+    -- take each possible symbol and DFA state, and
+    -- 1) find the equivalent set of ENFA states
+    -- 2) find the set of ENFA states that would be transitioned to
+    -- 3) find the DFA state equivalent to that set of ENFA states
+    transitionArray :: Array (DFAState, Symbol) (Maybe DFAState)
+    transitionArray = array arrayBounds $ map (\p@(s, c) -> (p, Map.lookup s codeToState >>= flip Map.lookup transitions >>= Map.lookup c >>= flip Map.lookup stateToCode)) $ range arrayBounds
     arrayBounds = ((0, minSym), (Map.size transitions - 1, maxSym))
 
-    stateToCode :: Map (Set State) State
+    -- for converting between ENFA state sets and DFA states
+    stateToCode :: Map (Set ENFAState) DFAState
     stateToCode = foldr (\(qs, i) m -> Map.insert qs i m) Map.empty $ zip states [0..]
-    codeToState :: Map Int (Set State)
+    codeToState :: Map DFAState (Set ENFAState)
     codeToState = foldr (\(qs, i) m -> Map.insert i qs m) Map.empty $ zip states [0..]
 
     transitions = buildTransitions Map.empty $ Set.singleton q0
     states = Set.toList $ Map.foldr (\v m -> Map.foldr Set.insert m v) (Map.keysSet transitions) transitions
 
-    acceptStates :: Set State
+    acceptStates :: Set DFAState
     -- take accept states and add all states that can reach an accept state
     -- via an epsilon transition -- (ie: include the accept state in their epsilon closure)
     acceptStates = Map.foldrWithKey (\qs c ac -> if isAccept qs then Set.insert c ac else ac) Set.empty stateToCode
         where
         isAccept qs = any (overlap as . epsilonClosure ts) $ Set.toList qs
-    overlap :: Set State -> Set State -> Bool
+
+    overlap :: Ord x => Set x -> Set x -> Bool
     overlap x y = not $ Set.null $ Set.intersection x y
 
-    buildTransitions :: (Map (Set State) (Map Symbol (Set State))) -> (Set State) -> (Map (Set State) (Map Symbol (Set State)))
+    -- build up a graph which is essentially a dfa whose states are sets of
+    -- ENFA states
+    -- accomplish this by walking the ENFA starting at the start state
+    buildTransitions :: DFAMap -> (Set State) -> DFAMap
     buildTransitions ts' qs
         | Map.member qs ts' = ts' -- we have already encountered that state, do nothing
         | otherwise = Map.foldr (flip buildTransitions) (Map.insert qs neighbours ts') neighbours
         where
         equivalentqs :: Set State
-        --equivalentqs = setCartesianProduct $ map (epsilonClosure ts) $ Set.elems qs
         equivalentqs = Set.foldr (\s ss -> Set.union ss $ epsilonClosure ts s) Set.empty qs
 
         nonEmptyTransitions :: State -> (Map Symbol (Set State))
@@ -165,12 +202,10 @@ compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray (fromJust $ Map.loo
         neighbours :: Map Symbol (Set State)
         neighbours = Set.foldr (\q m -> Map.unionWith Set.union m $ nonEmptyTransitions q) Map.empty equivalentqs
 
-        --Set.foldr Map.union$ Set.map (Set.map (Map.filterWithKey (\k _ -> isJust k) . flip Map.lookup ts) . epsilonClosure ts) qs
-
 {- ENFA helpers, used by combinators and compiler -}
 
 -- return the states reachable from some state via epsilon transitions only
-epsilonClosure :: Map State (Map (Maybe Symbol) (Set State)) -> State -> Set State
+epsilonClosure :: ENFAMap -> State -> Set State
 epsilonClosure ts = epsilonClosure_h Set.empty
     where
     epsilonClosure_h nbrs q
@@ -182,31 +217,36 @@ epsilonClosure ts = epsilonClosure_h Set.empty
 enfaStateSet :: ENFA -> Set State
 enfaStateSet (ENFA ts _ _) = Map.foldr (flip $ Map.foldr Set.union) (Map.keysSet ts) ts
 
+-- add ``n`` to all states in the ENFA (useful when preparing to merge two ENFAs)
 enfaIncreaseStates :: ENFA -> State -> ENFA
 enfaIncreaseStates (ENFA ts q0 as) n = ENFA ts' (q0 + n) as'
     where
     ts' = Map.map (Map.map (Set.mapMonotonic (+n))) $ Map.mapKeysMonotonic (+n) ts
     as' = Set.mapMonotonic (+n) as
 
-addTransition :: (Ord c, Ord s) => (Map s (Map (Maybe c) (Set s))) -> s -> Maybe c -> s -> (Map s (Map (Maybe c) (Set s)))
+addTransition :: ENFAMap -> State -> Maybe Symbol -> State -> ENFAMap
 addTransition ts q0 c q1 = Map.insertWith (Map.unionWith Set.union) q0 (Map.singleton c $ Set.singleton q1) ts
 
 {- ENFA combinators, used inside parser -}
 
+-- given a language l, return language l*
 repeat0 :: ENFA -> ENFA
 repeat0 e@(ENFA _ q0 as) = ENFA ts' q0 (Set.insert q0 as)
     where
     (ENFA ts' _ _) = repeat1 e
 
+-- given a language l, return language l+, formally: ll*
 repeat1 :: ENFA -> ENFA
 repeat1 (ENFA ts q0 as) = ENFA ts' q0 as
     where
     -- added transitions between accept states and start
     ts' = Set.foldr (\a acc -> addTransition acc a Nothing q0) ts as
 
+-- given a language l, return language l?, formally: ( epsilon | l )
 optional :: ENFA -> ENFA
 optional (ENFA ts q0 as) = ENFA ts q0 (Set.insert q0 as)
 
+-- given languages l and m, return language lm
 append :: ENFA -> ENFA -> ENFA
 append e1@(ENFA ts q0 as) e2 = ENFA ts' q0 bs'
     where
@@ -214,7 +254,10 @@ append e1@(ENFA ts q0 as) e2 = ENFA ts' q0 bs'
     -- insert epsilon transitions between accept states of the first enfa, and the start state of the second
     ts' = Map.union us' $ Set.foldr (\a ts'' -> addTransition ts'' a Nothing r0') ts as
 
-alternateExtra :: ENFA -> ENFA -> (State, State, ENFA)
+-- as with alternate, but return the offsets that the respective ENFAs
+-- were adjusted by during the computation. for use by the lexer, so even
+-- after adjusting the states, we still know what state is what
+alternateExtra :: ENFA -> ENFA -> (Int, Int, ENFA)
 alternateExtra e1 e2 = (offset1, offset2, ENFA vs 0 (Set.union as' bs'))
     where
     offset1 = 1
@@ -223,14 +266,19 @@ alternateExtra e1 e2 = (offset1, offset2, ENFA vs 0 (Set.union as' bs'))
     (ENFA us' r0' bs') = enfaIncreaseStates e2 offset2
     vs = Map.insert 0 (Map.singleton Nothing $ Set.fromList [q0', r0']) $ (Map.union ts' us')
 
+-- given languages l and m, return language l | m
 alternate :: ENFA -> ENFA -> ENFA
 alternate a b = (\(_,_,x) -> x) $ alternateExtra a b
 
+-- just a function for convenience / efficiency. this should be equivalent:
+-- alternateSingle = foldr1 alternate $ map singletonEnfa
+-- used to implement regexes like [abc]
 alternateSingle :: [Symbol] -> ENFA
 alternateSingle cs = ENFA ts 0 (Set.singleton 1)
     where
     ts = Map.singleton 0 (foldr (\c a -> Map.insert (Just c) (Set.singleton 1) a) Map.empty cs)
 
+-- return a language which accepts exactly 1 character
 singletonEnfa :: Symbol -> ENFA
 singletonEnfa c = ENFA (Map.singleton 0 (Map.singleton (Just c) (Set.singleton 1))) 0 (Set.singleton 1)
 
@@ -309,7 +357,6 @@ lexerParser = sepEndBy1
     (char '\n')
 
 compileLexer :: LexerENFA -> LexerDFA
--- compileLexer toks = trace ((unlines $ map show toks) ++ show enfa ++ "\n" ++ show acceptNames ++ "\n" ++ show codeToState) $ LexerDFA dfa $ Map.map getKind codeToState
 compileLexer toks = LexerDFA dfa $ Map.map getKind codeToState
     where
     (enfa, acceptNames) = foldl combine (ENFA Map.empty 0 Set.empty, Map.empty) toks
