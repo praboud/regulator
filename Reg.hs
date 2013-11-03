@@ -9,6 +9,8 @@ module Reg
     , compileLexer
     , accept
     , acceptExtra
+    , tokenize
+    , lexerTokenize
     , LexerDFA(LexerDFA)
     ) where
 
@@ -18,17 +20,16 @@ import Data.Set (Set)
 import qualified Data.Map as Map
 import Data.Map (Map)
 
-import Data.Array (Array, (!), array, bounds, listArray)
+import Data.Array (Array, (!), array, bounds)
 import Data.Ix (Ix, range, inRange)
-import Data.Maybe (fromJust, isJust, fromMaybe, mapMaybe)
-import Data.List (foldr1, intercalate, nub)
-import Data.Char (toUpper, ord, chr)
+import Data.Maybe (fromJust, isJust, isNothing, fromMaybe, mapMaybe)
+import Data.List (intercalate, nub)
+import Data.Char (toUpper, chr)
 
 import Control.Monad (foldM, liftM, (>=>))
 import Text.ParserCombinators.Parsec hiding (optional)
 import Text.Printf (printf)
 
-import Debug.Trace
 
 {- high level documentation things
  -
@@ -87,6 +88,8 @@ type LexerENFA c s = [(ENFA c s, String)]
 
 data LexerDFA c s = LexerDFA (DFA c s) (Map s String)
 
+data Token c s = Token s [c] deriving Show
+
 instance Show (LexerDFA Char Int) where
     show (LexerDFA (DFA ts q0 _) as) = header ++ def ++ q0' ++ "\n" ++ ts' ++ "\n" ++ enum ++ "\n" ++ enum_to_string ++ "\n" ++ as' ++ footer
         where
@@ -110,7 +113,6 @@ instance Show (LexerDFA Char Int) where
 
         footer = "/* END GENERATED CODE */"
 
-        st_count = max_st - min_st + 1 :: Int
         char_count = 256 :: Int
         ((min_st, _), (max_st, _)) = bounds ts
         min_char = chr 0
@@ -123,6 +125,26 @@ acceptExtra :: (Ix c, Ix s) => DFA c s -> [c] -> Maybe s
 acceptExtra (DFA ts q0 as) = foldM transition q0 >=> (\q -> if Set.member q as then Just q else Nothing)
     where
     transition q c = if inRange (bounds ts) (q, c) then ts ! (q, c) else Nothing
+
+lexerTokenize :: (Ix c, Ix s) => LexerDFA c s -> [c] -> Either String [Token c String]
+lexerTokenize (LexerDFA dfa names) cs = fmap (map (\(Token q s) -> Token (names Map.! q) s)) $ tokenize dfa cs
+
+tokenize :: (Ix c, Ix s) => DFA c s -> [c] -> Either String [Token c s]
+tokenize (DFA ts q0 as) cs = tok_h [] q0 cs
+    where
+    err rs q
+        | Set.member q as = Right $ Token q (reverse rs)
+        | otherwise = Left "Error"
+    tok_h rs q us
+        | null us = fmap (\x -> [x]) $ err rs q
+        | isNothing q' = do
+            tok <- err rs q 
+            toks <- tok_h [] q0 us
+            return (tok:toks)
+        | otherwise = tok_h (u:rs) (fromJust q') (tail us) 
+        where
+        u = head us
+        q' = ts ! (q, u) 
 
 compileEnfaToDfa :: (Ix c, Ord s) => ENFA c s -> DFA c Int
 compileEnfaToDfa = fst . compileEnfaToDfaExtra
@@ -178,7 +200,6 @@ epsilonClosure ts = epsilonClosure_h Set.empty
         | otherwise = Set.foldr (flip epsilonClosure_h) (Set.insert q nbrs) adj
         where
         adj = fromMaybe Set.empty (Map.lookup q ts >>= Map.lookup Nothing)
-        nbrs' = Set.insert q nbrs
 
 reverseEpsilonClosure :: forall s c. (Ord s, Ord c) => (Map s (Map (Maybe c) (Set s))) -> s -> Set s
 reverseEpsilonClosure ts q0 = Set.insert q0 $ reverseEpsilonClosure_h Set.empty q0
@@ -208,7 +229,7 @@ addTransition ts q0 c q1 = Map.insertWith (Map.unionWith Set.union) q0 (Map.sing
 {- ENFA combinators, used inside parser -}
 
 repeat0 :: (Ord c, Ord s) => ENFA c s -> ENFA c s
-repeat0 e@(ENFA ts q0 as) = ENFA ts' q0 (Set.insert q0 as)
+repeat0 e@(ENFA _ q0 as) = ENFA ts' q0 (Set.insert q0 as)
     where
     (ENFA ts' _ _) = repeat1 e
 
@@ -222,21 +243,22 @@ optional :: (Ord c, Ord s) => ENFA c s -> ENFA c s
 optional (ENFA ts q0 as) = ENFA ts q0 (Set.insert q0 as)
 
 append :: (Ord c, Integral s) => ENFA c s -> ENFA c s -> ENFA c s
-append fst@(ENFA ts q0 as) snd = ENFA ts' q0 bs'
+append e1@(ENFA ts q0 as) e2 = ENFA ts' q0 bs'
     where
-    (ENFA us' r0' bs') = enfaIncreaseStates snd $ fromIntegral $ Set.size $ enfaStateSet fst
+    (ENFA us' r0' bs') = enfaIncreaseStates e2 $ fromIntegral $ Set.size $ enfaStateSet e1
     -- insert epsilon transitions between accept states of the first enfa, and the start state of the second
-    ts' = Map.union us' $ Set.foldr (\a ts' -> addTransition ts' a Nothing r0') ts as
+    ts' = Map.union us' $ Set.foldr (\a ts'' -> addTransition ts'' a Nothing r0') ts as
 
 alternateExtra :: (Ord c, Integral s) => ENFA c s -> ENFA c s -> (s, s, ENFA c s)
-alternateExtra fst snd = (offsetFst, offsetSnd, ENFA vs 0 (Set.union as' bs'))
+alternateExtra e1 e2 = (offset1, offset2, ENFA vs 0 (Set.union as' bs'))
     where
-    offsetFst = 1
-    offsetSnd = (+1) $ fromIntegral (Set.size $ enfaStateSet fst)
-    (ENFA ts' q0' as') = enfaIncreaseStates fst offsetFst
-    (ENFA us' r0' bs') = enfaIncreaseStates snd offsetSnd
+    offset1 = 1
+    offset2 = (+1) $ fromIntegral (Set.size $ enfaStateSet e1)
+    (ENFA ts' q0' as') = enfaIncreaseStates e1 offset1
+    (ENFA us' r0' bs') = enfaIncreaseStates e2 offset2
     vs = Map.insert 0 (Map.singleton Nothing $ Set.fromList [q0', r0']) $ (Map.union ts' us')
 
+alternate :: (Ord c, Integral s) => ENFA c s -> ENFA c s -> ENFA c s
 alternate a b = (\(_,_,x) -> x) $ alternateExtra a b
 
 alternateSingle :: (Ord c) => [c] -> ENFA c Int
@@ -247,8 +269,7 @@ alternateSingle cs = ENFA ts 0 (Set.singleton 1)
 singletonEnfa :: Ord c => c -> ENFA c Int
 singletonEnfa c = ENFA (Map.singleton 0 (Map.singleton (Just c) (Set.singleton 1))) 0 (Set.singleton 1)
 
-emptyEnfa = ENFA Map.empty 0 (Set.singleton 0)
-
+-- emptyEnfa = ENFA Map.empty 0 (Set.singleton 0)
 
 {- parser related things, turn string/regex into ENFA -}
 
@@ -261,9 +282,9 @@ regexpParser = liftM (foldr1 alternate) $ sepBy1 regexpTermParser (char '|')
     charClassParser :: Parser (ENFA Char Int)
     charClassParser = do
         char '['
-        negate <- optionMaybe $ char '^'
+        invert <- optionMaybe $ char '^'
         cs <- liftM concat $ manyTill (try charRange <|> builtInRanges <|> singleChar) (char ']')
-        return $ alternateSingle $ case negate of
+        return $ alternateSingle $ case invert of
             Nothing -> cs
             Just _  -> [x | x <- range (chr 0, chr 255), not $ Set.member x cs']
                 where
@@ -296,8 +317,11 @@ regexpParser = liftM (foldr1 alternate) $ sepBy1 regexpTermParser (char '|')
              <|> (liftM singletonEnfa $ escapeParser "|()[]+?*.")
             ) >>= modifier)
 
+spaceChars :: String
 spaceChars = " \t\n"
+digitChars :: String
 digitChars = "0123456789"
+wordChars :: String
 wordChars  = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 escapeParser :: [Char] -> Parser Char
@@ -336,13 +360,13 @@ compileLexer toks = LexerDFA dfa $ Map.map getKind codeToState
         else (map toUpper . intercalate "_OR_" . Set.toList) filt
         where
         filt = setMapMaybe (flip Map.lookup acceptNames) qs'
-        qs' = Set.foldr (\q qs' -> Set.union qs' $ epsilonClosure ts q) Set.empty qs
+        qs' = Set.foldr (\q qs'' -> Set.union qs'' $ epsilonClosure ts q) Set.empty qs
 
     combine :: (ENFA c Int, Map Int String) -> (ENFA c Int, String) -> (ENFA c Int, Map Int String)
-    combine (enfaAcc, names) (enfa, name) = (enfaAcc', names')
+    combine (enfaAcc, names) (enfa', name) = (enfaAcc', names')
         where
-        (offsetAcc, offsetSingle, enfaAcc') = alternateExtra enfaAcc enfa
-        names' = Set.foldr (\a as -> Map.insert (a + offsetSingle) name as) (Map.mapKeysMonotonic (+offsetAcc) names) $ enfaAccept enfa
+        (offsetAcc, offsetSingle, enfaAcc') = alternateExtra enfaAcc enfa'
+        names' = Set.foldr (\a as -> Map.insert (a + offsetSingle) name as) (Map.mapKeysMonotonic (+offsetAcc) names) $ enfaAccept enfa'
 
 {- general helpers -}
 
@@ -351,7 +375,7 @@ setMapMaybe f = Set.foldr (\x a -> case f x of
     Nothing -> a
     Just y  -> Set.insert y a) Set.empty
 
-enfaTransitions (ENFA ts _ _) = ts
+enfaAccept :: ENFA c s -> (Set s)
 enfaAccept (ENFA _ _ as) = as
 
 {-
