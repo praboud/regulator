@@ -8,7 +8,6 @@ module Reg
     , compileEnfaToDfa
     , compileLexer
     , accept
-    , acceptExtra
     , tokenize
     , lexerTokenize
     , LexerDFA(LexerDFA)
@@ -27,7 +26,7 @@ import Data.List (intercalate, nub)
 import Data.Char (toUpper, chr)
 
 import Control.Monad (foldM, liftM, (>=>))
-import Text.ParserCombinators.Parsec hiding (optional)
+import Text.ParserCombinators.Parsec hiding (optional, State)
 import Text.Printf (printf)
 
 
@@ -72,28 +71,25 @@ import Text.Printf (printf)
  -       being alternation, repetition and concatenation). Therefore,
  -       we use ENFA's as an intermediate form between regular expressions
  -       and DFA's.
- -
- - ENFA's and DFA's are somewhat written to accomodate any ordinal
- - type as the state type. in the vast majority of cases, we actually just use the int
- - type in practice. In some places in the code, I have used int's for convenience.
- - In the future, I should probably make all of this code generic, or just bite the bullet
- - and make all of the code require integers. This half-half solution is too confusing.
  -}
 
-data DFA c s = DFA (Array (s, c) (Maybe s)) s (Set s) deriving Show
+type State = Int
+type Symbol = Char
 
-data ENFA c s = ENFA (Map s (Map (Maybe c) (Set s))) s (Set s) deriving Show
+data DFA = DFA (Array (State, Symbol) (Maybe State)) State (Set State) deriving Show
 
-type LexerENFA c s = [(ENFA c s, String)]
+data ENFA = ENFA (Map State (Map (Maybe Symbol) (Set State))) State (Set State) deriving Show
 
-data LexerDFA c s = LexerDFA (DFA c s) (Map s String)
+type LexerENFA = [(ENFA, String)]
 
-data Token c s = Token s [c]
+data LexerDFA = LexerDFA DFA (Map State String)
 
-instance Show (Token Char String) where
+data Token x = Token x [Symbol]
+
+instance Show (Token String) where
     show (Token name lexeme) = name ++ ": '" ++ lexeme ++ "'"
 
-instance Show (LexerDFA Char Int) where
+instance Show LexerDFA where
     show (LexerDFA (DFA ts q0 _) as) = header ++ def ++ q0' ++ "\n" ++ ts' ++ "\n" ++ enum ++ "\n" ++ enum_to_string ++ "\n" ++ as' ++ footer
         where
         err = -1 :: Int
@@ -121,18 +117,15 @@ instance Show (LexerDFA Char Int) where
         min_char = chr 0
         max_char = chr 255
 
-accept :: (Ix c, Ix s) => DFA c s -> [c] -> Bool
-accept dfa = isJust . acceptExtra dfa
-
-acceptExtra :: (Ix c, Ix s) => DFA c s -> [c] -> Maybe s
-acceptExtra (DFA ts q0 as) = foldM transition q0 >=> (\q -> if Set.member q as then Just q else Nothing)
+accept :: DFA -> [Symbol] -> Maybe State
+accept (DFA ts q0 as) = foldM transition q0 >=> (\q -> if Set.member q as then Just q else Nothing)
     where
     transition q c = if inRange (bounds ts) (q, c) then ts ! (q, c) else Nothing
 
-lexerTokenize :: (Ix c, Ix s) => LexerDFA c s -> [c] -> Either String [Token c String]
+lexerTokenize :: LexerDFA -> [Symbol] -> Either String [Token String]
 lexerTokenize (LexerDFA dfa names) cs = fmap (map (\(Token q s) -> Token (names Map.! q) s)) $ tokenize dfa cs
 
-tokenize :: (Ix c, Ix s) => DFA c s -> [c] -> Either String [Token c s]
+tokenize :: DFA -> [Symbol] -> Either String [Token Int]
 tokenize (DFA ts q0 as) cs = tok_h [] q0 cs
     where
     err rs q
@@ -141,61 +134,71 @@ tokenize (DFA ts q0 as) cs = tok_h [] q0 cs
     tok_h rs q us
         | null us = fmap (\x -> [x]) $ err rs q
         | isNothing q' = do
-            tok <- err rs q 
+            tok <- err rs q
             toks <- tok_h [] q0 us
             return (tok:toks)
-        | otherwise = tok_h (u:rs) (fromJust q') (tail us) 
+        | otherwise = tok_h (u:rs) (fromJust q') (tail us)
         where
         u = head us
-        q' = ts ! (q, u) 
+        q' = ts ! (q, u)
 
-compileEnfaToDfa :: (Ix c, Ord s) => ENFA c s -> DFA c Int
+compileEnfaToDfa :: ENFA -> DFA
 compileEnfaToDfa = fst . compileEnfaToDfaExtra
 
-compileEnfaToDfaExtra :: forall c s. (Ix c, Ord s) => ENFA c s -> (DFA c Int, Map Int (Set s))
+-- for clarity
+--type DFAState = State
+--type ENFAState = State
+
+compileEnfaToDfaExtra :: ENFA -> (DFA, Map Int (Set State))
 compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray (fromJust $ Map.lookup (Set.singleton q0) stateToCode) acceptStates, codeToState)
     where
+
     maxSym = maximum syms
     minSym = minimum syms
     syms = concat $ map (mapMaybe id . Map.keys) $ Map.elems ts
 
-    transitionArray :: Array (Int, c) (Maybe Int)
+    transitionArray :: Array (State, Symbol) (Maybe State)
     transitionArray = array arrayBounds $ map (\(s, c) -> ((s, c), Map.lookup s codeToState >>= flip Map.lookup transitions >>= Map.lookup c >>= flip Map.lookup stateToCode)) $ range arrayBounds
     arrayBounds = ((0, minSym), (Map.size transitions - 1, maxSym))
 
-    stateToCode :: Map (Set s) Int
+    stateToCode :: Map (Set State) State
     stateToCode = foldr (\(qs, i) m -> Map.insert qs i m) Map.empty $ zip states [0..]
-    codeToState :: Map Int (Set s)
+    codeToState :: Map Int (Set State)
     codeToState = foldr (\(qs, i) m -> Map.insert i qs m) Map.empty $ zip states [0..]
 
     transitions = buildTransitions Map.empty $ Set.singleton q0
     states = Set.toList $ Map.foldr (\v m -> Map.foldr Set.insert m v) (Map.keysSet transitions) transitions
 
-    acceptStates :: Set Int
-    acceptStates = Set.foldr (\a ac -> Set.union ac $ Set.fromList $ Map.elems $ Map.filterWithKey (\k _ -> overlap k $ reverseEpsilonClosure ts a) stateToCode) Set.empty as
-    overlap :: Set s -> Set s -> Bool
+    acceptStates :: Set State
+    -- take accept states and add all states that can reach an accept state
+    -- via an epsilon transition -- (ie: include the accept state in their epsilon closure)
+    acceptStates = Map.foldrWithKey (\qs c ac -> if isAccept qs then Set.insert c ac else ac) Set.empty stateToCode
+        where
+        isAccept qs = any (overlap as . epsilonClosure ts) $ Set.toList qs
+    overlap :: Set State -> Set State -> Bool
     overlap x y = not $ Set.null $ Set.intersection x y
 
-    buildTransitions :: (Map (Set s) (Map c (Set s))) -> (Set s) -> (Map (Set s) (Map c (Set s)))
+    buildTransitions :: (Map (Set State) (Map Symbol (Set State))) -> (Set State) -> (Map (Set State) (Map Symbol (Set State)))
     buildTransitions ts' qs
         | Map.member qs ts' = ts' -- we have already encountered that state, do nothing
         | otherwise = Map.foldr (flip buildTransitions) (Map.insert qs neighbours ts') neighbours
         where
-        equivalentqs :: Set s
+        equivalentqs :: Set State
         --equivalentqs = setCartesianProduct $ map (epsilonClosure ts) $ Set.elems qs
         equivalentqs = Set.foldr (\s ss -> Set.union ss $ epsilonClosure ts s) Set.empty qs
 
-        nonEmptyTransitions :: s -> (Map c (Set s))
+        nonEmptyTransitions :: State -> (Map Symbol (Set State))
         nonEmptyTransitions = maybe Map.empty (Map.mapKeysMonotonic fromJust . Map.filterWithKey (\k _ -> isJust k)) . flip Map.lookup ts
 
-        neighbours :: Map c (Set s)
+        neighbours :: Map Symbol (Set State)
         neighbours = Set.foldr (\q m -> Map.unionWith Set.union m $ nonEmptyTransitions q) Map.empty equivalentqs
 
         --Set.foldr Map.union$ Set.map (Set.map (Map.filterWithKey (\k _ -> isJust k) . flip Map.lookup ts) . epsilonClosure ts) qs
 
 {- ENFA helpers, used by combinators and compiler -}
 
-epsilonClosure :: (Ord s, Ord c) => (Map s (Map (Maybe c) (Set s))) -> s -> Set s
+-- return the states reachable from some state via epsilon transitions only
+epsilonClosure :: Map State (Map (Maybe Symbol) (Set State)) -> State -> Set State
 epsilonClosure ts = epsilonClosure_h Set.empty
     where
     epsilonClosure_h nbrs q
@@ -204,23 +207,10 @@ epsilonClosure ts = epsilonClosure_h Set.empty
         where
         adj = fromMaybe Set.empty (Map.lookup q ts >>= Map.lookup Nothing)
 
-reverseEpsilonClosure :: forall s c. (Ord s, Ord c) => (Map s (Map (Maybe c) (Set s))) -> s -> Set s
-reverseEpsilonClosure ts q0 = Set.insert q0 $ reverseEpsilonClosure_h Set.empty q0
-    where
-    reverseEpsilonClosure_h :: (Set s) -> s -> (Set s)
-    reverseEpsilonClosure_h sources q
-        -- if we have seen this node before, stop (otherwise, we will encounter a cycle)
-        | Set.member q sources = sources
-        | otherwise = Set.foldr (flip reverseEpsilonClosure_h) sources' sources'
-        where
-        sources' :: Set s
-        -- a set of sources
-        sources' = Map.foldrWithKey (\state statetrans src -> if maybe False (Set.member q) (Map.lookup Nothing statetrans) then Set.insert state src else src) sources ts
-
-enfaStateSet :: (Ord c, Ord s) => ENFA c s -> Set s
+enfaStateSet :: ENFA -> Set State
 enfaStateSet (ENFA ts _ _) = Map.foldr (flip $ Map.foldr Set.union) (Map.keysSet ts) ts
 
-enfaIncreaseStates :: (Ord c, Integral s) => ENFA c s -> s -> ENFA c s
+enfaIncreaseStates :: ENFA -> State -> ENFA
 enfaIncreaseStates (ENFA ts q0 as) n = ENFA ts' (q0 + n) as'
     where
     ts' = Map.map (Map.map (Set.mapMonotonic (+n))) $ Map.mapKeysMonotonic (+n) ts
@@ -231,28 +221,28 @@ addTransition ts q0 c q1 = Map.insertWith (Map.unionWith Set.union) q0 (Map.sing
 
 {- ENFA combinators, used inside parser -}
 
-repeat0 :: (Ord c, Ord s) => ENFA c s -> ENFA c s
+repeat0 :: ENFA -> ENFA
 repeat0 e@(ENFA _ q0 as) = ENFA ts' q0 (Set.insert q0 as)
     where
     (ENFA ts' _ _) = repeat1 e
 
-repeat1 :: (Ord c, Ord s) => ENFA c s -> ENFA c s
+repeat1 :: ENFA -> ENFA
 repeat1 (ENFA ts q0 as) = ENFA ts' q0 as
     where
     -- added transitions between accept states and start
     ts' = Set.foldr (\a acc -> addTransition acc a Nothing q0) ts as
 
-optional :: (Ord c, Ord s) => ENFA c s -> ENFA c s
+optional :: ENFA -> ENFA
 optional (ENFA ts q0 as) = ENFA ts q0 (Set.insert q0 as)
 
-append :: (Ord c, Integral s) => ENFA c s -> ENFA c s -> ENFA c s
+append :: ENFA -> ENFA -> ENFA
 append e1@(ENFA ts q0 as) e2 = ENFA ts' q0 bs'
     where
     (ENFA us' r0' bs') = enfaIncreaseStates e2 $ fromIntegral $ Set.size $ enfaStateSet e1
     -- insert epsilon transitions between accept states of the first enfa, and the start state of the second
     ts' = Map.union us' $ Set.foldr (\a ts'' -> addTransition ts'' a Nothing r0') ts as
 
-alternateExtra :: (Ord c, Integral s) => ENFA c s -> ENFA c s -> (s, s, ENFA c s)
+alternateExtra :: ENFA -> ENFA -> (State, State, ENFA)
 alternateExtra e1 e2 = (offset1, offset2, ENFA vs 0 (Set.union as' bs'))
     where
     offset1 = 1
@@ -261,28 +251,28 @@ alternateExtra e1 e2 = (offset1, offset2, ENFA vs 0 (Set.union as' bs'))
     (ENFA us' r0' bs') = enfaIncreaseStates e2 offset2
     vs = Map.insert 0 (Map.singleton Nothing $ Set.fromList [q0', r0']) $ (Map.union ts' us')
 
-alternate :: (Ord c, Integral s) => ENFA c s -> ENFA c s -> ENFA c s
+alternate :: ENFA -> ENFA -> ENFA
 alternate a b = (\(_,_,x) -> x) $ alternateExtra a b
 
-alternateSingle :: (Ord c) => [c] -> ENFA c Int
+alternateSingle :: [Symbol] -> ENFA
 alternateSingle cs = ENFA ts 0 (Set.singleton 1)
     where
     ts = Map.singleton 0 (foldr (\c a -> Map.insert (Just c) (Set.singleton 1) a) Map.empty cs)
 
-singletonEnfa :: Ord c => c -> ENFA c Int
+singletonEnfa :: Symbol -> ENFA
 singletonEnfa c = ENFA (Map.singleton 0 (Map.singleton (Just c) (Set.singleton 1))) 0 (Set.singleton 1)
 
 -- emptyEnfa = ENFA Map.empty 0 (Set.singleton 0)
 
 {- parser related things, turn string/regex into ENFA -}
 
-regexpParser :: Parser (ENFA Char Int)
+regexpParser :: Parser ENFA
 regexpParser = liftM (foldr1 alternate) $ sepBy1 regexpTermParser (char '|')
     where
     parens = between (char '(') (char ')') regexpParser
     -- parse a character range like [abc], or [a-zA-Z]
     -- alternate between any 1 single character
-    charClassParser :: Parser (ENFA Char Int)
+    charClassParser :: Parser ENFA
     charClassParser = do
         char '['
         invert <- optionMaybe $ char '^'
@@ -303,11 +293,11 @@ regexpParser = liftM (foldr1 alternate) $ sepBy1 regexpTermParser (char '|')
     dot = char '.' >> return (range (chr 0, chr 255))
 
     -- gets postfix operators on regexes
-    modifier :: ENFA Char Int -> Parser (ENFA Char Int)
+    modifier :: ENFA -> Parser ENFA
     modifier enfa = do
         op <- combParser
         return $ op enfa
-    combParser :: (Ord c, Ord s) => Parser (ENFA c s -> ENFA c s)
+    combParser :: Parser (ENFA -> ENFA)
     combParser = (char '*' >> return repeat0)
                  <|> (char '+' >> return repeat1)
                  <|> (char '?' >> return optional)
@@ -337,7 +327,7 @@ escapeParser cs = (char esc >> oneOf (esc : cs)) <|> (noneOf ('\n' : cs))
 
 {- things dealing with language lexers -}
 
-lexerParser :: Parser (LexerENFA Char Int)
+lexerParser :: Parser LexerENFA
 lexerParser = sepEndBy1
     (do
         name <- many1 alphaNum
@@ -346,7 +336,7 @@ lexerParser = sepEndBy1
         return (enfa, name))
     (char '\n')
 
-compileLexer :: forall c. (Show c, Ix c) => LexerENFA c Int -> LexerDFA c Int
+compileLexer :: LexerENFA -> LexerDFA
 -- compileLexer toks = trace ((unlines $ map show toks) ++ show enfa ++ "\n" ++ show acceptNames ++ "\n" ++ show codeToState) $ LexerDFA dfa $ Map.map getKind codeToState
 compileLexer toks = LexerDFA dfa $ Map.map getKind codeToState
     where
@@ -357,7 +347,7 @@ compileLexer toks = LexerDFA dfa $ Map.map getKind codeToState
 
     -- maps a set of enfa states (whose combination of states now represents
     -- a single dfa state) to a set of strings
-    getKind :: Set Int -> String
+    getKind :: Set State -> String
     getKind qs = if Set.null filt
         then "NIL"
         else (map toUpper . intercalate "_OR_" . Set.toList) filt
@@ -365,7 +355,7 @@ compileLexer toks = LexerDFA dfa $ Map.map getKind codeToState
         filt = setMapMaybe (flip Map.lookup acceptNames) qs'
         qs' = Set.foldr (\q qs'' -> Set.union qs'' $ epsilonClosure ts q) Set.empty qs
 
-    combine :: (ENFA c Int, Map Int String) -> (ENFA c Int, String) -> (ENFA c Int, Map Int String)
+    combine :: (ENFA, Map Int String) -> (ENFA, String) -> (ENFA, Map Int String)
     combine (enfaAcc, names) (enfa', name) = (enfaAcc', names')
         where
         (offsetAcc, offsetSingle, enfaAcc') = alternateExtra enfaAcc enfa'
@@ -378,11 +368,5 @@ setMapMaybe f = Set.foldr (\x a -> case f x of
     Nothing -> a
     Just y  -> Set.insert y a) Set.empty
 
-enfaAccept :: ENFA c s -> (Set s)
+enfaAccept :: ENFA -> (Set State)
 enfaAccept (ENFA _ _ as) = as
-
-{-
-fromRight (Right v) = v
-
-test = fromRight $ parse regexpParser "regex" "aoeu|asdf"
--}
