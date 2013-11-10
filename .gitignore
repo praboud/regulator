@@ -3,3 +3,5 @@
 genLex
 match
 testLex
+graph
+dist/
