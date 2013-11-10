@@ -23,7 +23,7 @@ import Data.Map (Map)
 import Data.Array (Array, (!), array, bounds)
 import Data.Ix (Ix, range, inRange)
 import Data.Maybe (fromJust, isJust, isNothing, fromMaybe, mapMaybe)
-import Data.List (intercalate)
+import Data.List (intercalate, sortBy, groupBy)
 import Data.Char (toUpper, chr)
 
 import Control.Monad (foldM, liftM, (>=>))
@@ -163,7 +163,12 @@ compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray (fromJust $ Map.loo
     -- 2) find the set of ENFA states that would be transitioned to
     -- 3) find the DFA state equivalent to that set of ENFA states
     transitionArray :: Array (DFAState, Symbol) (Maybe DFAState)
-    transitionArray = array arrayBounds $ map (\p@(s, c) -> (p, Map.lookup s codeToState >>= flip Map.lookup transitions >>= Map.lookup c >>= flip Map.lookup stateToCode)) $ range arrayBounds
+    transitionArray = array arrayBounds
+                      $ map (\p@(s, c) -> (p, Map.lookup s codeToState
+                                          >>= flip Map.lookup transitions
+                                          >>= Map.lookup c
+                                          >>= flip Map.lookup stateToCode))
+                      $ range arrayBounds
     arrayBounds = ((0, minSym), (Map.size transitions - 1, maxSym))
 
     -- for converting between ENFA state sets and DFA states
@@ -172,7 +177,8 @@ compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray (fromJust $ Map.loo
     codeToState :: Map DFAState (Set ENFAState)
     codeToState = foldr (\(qs, i) m -> Map.insert i qs m) Map.empty $ zip states [0..]
 
-    transitions = buildTransitions Map.empty $ Set.singleton q0
+    transitions = compressDFAMap $ buildTransitions Map.empty $ Set.singleton q0
+    -- every state used in the transitions "proto-dfa"
     states = Set.toList $ Map.foldr (\v m -> Map.foldr Set.insert m v) (Map.keysSet transitions) transitions
 
     acceptStates :: Set DFAState
@@ -201,6 +207,29 @@ compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray (fromJust $ Map.loo
 
         neighbours :: Map Symbol (Set State)
         neighbours = Set.foldr (\q m -> Map.unionWith Set.union m $ nonEmptyTransitions q) Map.empty equivalentqs
+
+-- remove duplicate states: those that have exactly the same outbound transitions
+compressDFAMap :: DFAMap -> DFAMap
+compressDFAMap = Map.fromList . reduce . Map.toList
+    where
+    -- reduce :: DFAMap -> DFAMap
+    reduce :: [(Set State, Map Symbol (Set State))] -> [(Set State, Map Symbol (Set State))]
+    reduce dfaml
+        | Map.null mapping = dfaml
+        | otherwise = reduce $ map (\(q, ts) -> (remap q, Map.map remap ts)) reduced
+        where
+        (reduced, mappingList) = unzip $ map (\xs@(x:rs) -> (x, case rs of {[] -> Map.empty; _ -> constructReplacement $ map fst xs}))
+                                 $ groupBy (byTrans (==)) $ sortBy (byTrans compare) dfaml
+        mapping = foldr1 Map.union mappingList
+        remap q = fromMaybe q $ Map.lookup q mapping
+
+    byTrans :: (x -> x -> y) -> (z, x) -> (z, x) -> y
+    byTrans f a b = f (snd a) (snd b)
+
+    constructReplacement :: [Set State] -> Map (Set State) (Set State)
+    constructReplacement xs = foldr (\x ac -> Map.insert x common ac) Map.empty xs
+        where common = foldr1 Set.union xs
+
 
 {- ENFA helpers, used by combinators and compiler -}
 
