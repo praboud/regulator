@@ -16,7 +16,7 @@ toCpp (LexerDFA (DFA ts q0 _) as) = header ++ def ++ q0' ++ "\n" ++ ts' ++ "\n" 
     def = printf "#define ST_ERR %d\n" err
     q0' = printf "#define ST_START %d\n" q0
 
-    ts' = (printf "int transitions[][%d] = {\n" char_count) ++ intercalate ",\n" tlines ++ "};\n"
+    ts' = printf "int transitions[][%d] = {\n" char_count ++ intercalate ",\n" tlines ++ "};\n"
     tlines = [('{':) $ (++"}") $ intercalate ", " [gettr s c | c <- range (min_char, max_char)] | s <- range (min_st, max_st)]
     gettr s c = show $ fromMaybe err $ if inRange (bounds ts) (s, c) then ts ! (s, c) else Nothing
 

@@ -113,13 +113,13 @@ lexerTokenize (LexerDFA dfa names) cs = fmap (map (\(Token q s) -> Token (names 
  - that language
  -}
 tokenize :: DFA -> [Symbol] -> Either String [Token Int]
-tokenize (DFA ts q0 as) cs = tok_h [] q0 cs
+tokenize (DFA ts q0 as) = tok_h [] q0
     where
     err rs q
         | Set.member q as = Right $ Token q (reverse rs)
         | otherwise = Left "Error"
     tok_h rs q us
-        | null us = fmap (\x -> [x]) $ err rs q
+        | null us = fmap (:[]) $ err rs q
         | isNothing q' = do
             tok <- err rs q
             toks <- tok_h [] q0 us
@@ -150,7 +150,7 @@ compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray (fromJust $ Map.loo
     where
 
     -- get a list of all symbols in use
-    syms = concat $ map (mapMaybe id . Map.keys) $ Map.elems ts
+    syms = concatMap (mapMaybe id . Map.keys) $ Map.elems ts
 
     -- get bounds on those symbols
     maxSym = maximum syms
@@ -179,7 +179,7 @@ compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray (fromJust $ Map.loo
 
     transitions = compressDFAMap $ buildTransitions Map.empty $ Set.singleton q0
     -- every state used in the transitions "proto-dfa"
-    states = Set.toList $ Map.foldr (\v m -> Map.foldr Set.insert m v) (Map.keysSet transitions) transitions
+    states = Set.toList $ Map.foldr (flip $ Map.foldr Set.insert) (Map.keysSet transitions) transitions
 
     acceptStates :: Set DFAState
     -- take accept states and add all states that can reach an accept state
@@ -194,7 +194,7 @@ compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray (fromJust $ Map.loo
     -- build up a graph which is essentially a dfa whose states are sets of
     -- ENFA states
     -- accomplish this by walking the ENFA starting at the start state
-    buildTransitions :: DFAMap -> (Set State) -> DFAMap
+    buildTransitions :: DFAMap -> Set State -> DFAMap
     buildTransitions ts' qs
         | Map.member qs ts' = ts' -- we have already encountered that state, do nothing
         | otherwise = Map.foldr (flip buildTransitions) (Map.insert qs neighbours ts') neighbours
@@ -202,7 +202,7 @@ compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray (fromJust $ Map.loo
         equivalentqs :: Set State
         equivalentqs = Set.foldr (\s ss -> Set.union ss $ epsilonClosure ts s) Set.empty qs
 
-        nonEmptyTransitions :: State -> (Map Symbol (Set State))
+        nonEmptyTransitions :: State -> Map Symbol (Set State)
         nonEmptyTransitions = maybe Map.empty (Map.mapKeysMonotonic fromJust . Map.filterWithKey (\k _ -> isJust k)) . flip Map.lookup ts
 
         neighbours :: Map Symbol (Set State)
@@ -293,7 +293,7 @@ alternateExtra e1 e2 = (offset1, offset2, ENFA vs 0 (Set.union as' bs'))
     offset2 = (+1) $ fromIntegral (Set.size $ enfaStateSet e1)
     (ENFA ts' q0' as') = enfaIncreaseStates e1 offset1
     (ENFA us' r0' bs') = enfaIncreaseStates e2 offset2
-    vs = Map.insert 0 (Map.singleton Nothing $ Set.fromList [q0', r0']) $ (Map.union ts' us')
+    vs = Map.insert 0 (Map.singleton Nothing $ Set.fromList [q0', r0']) $ Map.union ts' us'
 
 -- given languages l and m, return language l | m
 alternate :: ENFA -> ENFA -> ENFA
@@ -350,13 +350,13 @@ regexpParser = liftM (foldr1 alternate) $ sepBy1 regexpTermParser (char '|')
     combParser = (char '*' >> return repeat0)
                  <|> (char '+' >> return repeat1)
                  <|> (char '?' >> return optional)
-                 <|> (return id)
+                 <|> return id
 
     regexpTermParser = liftM (foldr1 append) $ many (
             (try parens
              <|> try charClassParser
              <|> try (liftM alternateSingle (builtInRanges <|> dot))
-             <|> (liftM singletonEnfa $ escapeParser "|()[]+?*.")
+             <|> liftM singletonEnfa (escapeParser "|()[]+?*.")
             ) >>= modifier)
 
 spaceChars :: String
@@ -366,12 +366,12 @@ digitChars = "0123456789"
 wordChars :: String
 wordChars  = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
-escapeParser :: [Char] -> Parser Char
+escapeParser :: String -> Parser Char
 -- parses any character, except unescaped versions of any character in
 -- the list provided
 -- nb: we never allow newlines
 -- should probably extend this to any non-printable
-escapeParser cs = (char esc >> oneOf (esc : cs)) <|> (noneOf ('\n' : cs))
+escapeParser cs = (char esc >> oneOf (esc : cs)) <|> noneOf ('\n' : cs)
     where esc = '\\'
 
 {- things dealing with language lexers -}
@@ -416,5 +416,5 @@ setMapMaybe f = Set.foldr (\x a -> case f x of
     Nothing -> a
     Just y  -> Set.insert y a) Set.empty
 
-enfaAccept :: ENFA -> (Set State)
+enfaAccept :: ENFA -> Set State
 enfaAccept (ENFA _ _ as) = as

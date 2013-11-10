@@ -21,7 +21,7 @@ main = do
     filePath <- liftM head getArgs
     regex <- getLine
     case parse regexpParser "regex" regex of
-        Right enfa -> (graphToDotPng filePath $ dfaToDot $ compileEnfaToDfa enfa) >>= print
+        Right enfa -> graphToDotPng filePath (dfaToDot $ compileEnfaToDfa enfa) >>= print
         Left err -> print err
 
 dfaToDot :: DFA -> DotGraph Int
@@ -37,7 +37,7 @@ dfaParams :: DFA -> GraphvizParams Int () Char () ()
 dfaParams (DFA _ q as) = defaultParams
     { globalAttributes = gStyle
     , fmtNode = dfaNodeFormat
-    , fmtEdge = (\(_, _, el) -> [toLabel el])
+    , fmtEdge = \(_, _, el) -> [toLabel el]
     }
     where
     dfaNodeFormat :: (Int, ()) -> Attributes
