@@ -1,11 +1,10 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-import Reg (regexpParser, compileEnfaToDfa, DFA(DFA), allCharacterClasses)
+import Reg (regexpParser, compileEnfaToDfa, DFA(DFA), allCharacterClasses, LexerDFA(LexerDFA), compileLexer, lexerParser)
 import Text.ParserCombinators.Parsec (parse)
 import Data.GraphViz hiding (parse)
-import Data.GraphViz.Attributes.Complete( Attribute(RankDir, Splines, FontName)
-                                        , RankDir(FromLeft), EdgeType(SplineEdges))
+import Data.GraphViz.Attributes.Complete
 import Data.GraphViz.Exception
 import Control.Arrow(second)
 import Control.Monad (liftM)
@@ -13,17 +12,19 @@ import Data.Array (bounds, assocs)
 import Data.Ix (range)
 import Data.Maybe (isJust, fromJust)
 import Data.List (groupBy, sortBy, sort)
+import Data.List.Ordered (nub)
 import Data.Tuple (swap)
 import qualified Data.Set as Set
 -- import Control.Exception (handle)
 import System.Environment (getArgs)
 
-main :: IO()
+main :: IO ()
 main = do
-    filePath <- liftM head getArgs
-    regex <- getLine
-    case parse regexpParser "regex" regex of
-        Right enfa -> (graphToDotPng filePath $ dfaToDot $ compileEnfaToDfa enfa) >>= print
+    [lexFilePath, outFilePath] <- getArgs
+    lexfile <- readFile lexFilePath
+    case parse lexerParser "lexer" lexfile of
+        Right lexer -> (graphToDotPng outFilePath $ dfaToDot dfa) >>= print
+            where (LexerDFA dfa _) = compileLexer lexer
         Left err -> print err
 
 dfaToDot :: DFA -> DotGraph Int
@@ -31,7 +32,7 @@ dfaToDot dfa = dfaToDotParams (dfaParams dfa) dfa
 dfaToDotParams :: Ord cl => GraphvizParams Int () String cl l -> DFA -> DotGraph Int
 dfaToDotParams params (DFA ts _ _) = graphElemsToDot params ns es
     where
-    ns = map (second $ const ()) $ range $ bounds ts
+    ns = nub $ map (second $ const ()) $ range $ bounds ts
     es :: [(Int, Int, String)]
     -- filter out transitions that transition to an error state
     -- group all transitions that go from the same states
@@ -61,10 +62,18 @@ dfaParams (DFA _ q as) = defaultParams
         c = if n == q then Red else Black
 
 gStyle :: [GlobalAttributes]
-gStyle = [ GraphAttrs [RankDir FromLeft, Splines SplineEdges, FontName "courier"]
+gStyle = [ gAttrs
          , NodeAttrs  [textLabel "\\N", shape Circle]
          , EdgeAttrs  [color Black]
-                                              ]
+         ]
+    where
+    gAttrs = GraphAttrs
+        [RankDir FromLeft
+        , Splines SplineEdges
+        , FontName "courier"
+        , Size $ GSize { width = 100, height = Nothing, desiredSize = True }
+        , Concentrate True
+        ]
 
 graphToDotPng :: (Ord a, PrintDot a, ParseDot a) => FilePath -> DotGraph a -> IO Bool
 graphToDotPng fpre g = handle (\(_::GraphvizException) -> return False)

@@ -337,7 +337,7 @@ characterClasses =
     [ ("\\n", "\n")
     , ("\\t", "\t")
     , ("\\w", " \t\n")
-    , ("\\s", "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_")
+    , ("\\s", "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz")
     , ("\\d", "0123456789")
     ]
 
