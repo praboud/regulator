@@ -12,6 +12,7 @@ module Reg
     , lexerTokenize
     , LexerDFA(LexerDFA)
     , DFA(DFA)
+    , allCharacterClasses
     ) where
 
 
@@ -296,7 +297,7 @@ regexpParser = liftM (foldr1 alternate) $ sepBy1 regexpTermParser (char '|')
     charClassParser = do
         char '['
         invert <- optionMaybe $ char '^'
-        cs <- liftM concat $ manyTill (try charRange <|> builtInRanges <|> singleChar) (char ']')
+        cs <- liftM concat $ manyTill (try charRange <|> classes characterClasses <|> singleChar) (char ']')
         return $ alternateSingle $ case invert of
             Nothing -> cs
             Just _  -> [x | x <- range (chr 0, chr 255), not $ Set.member x cs']
@@ -308,9 +309,6 @@ regexpParser = liftM (foldr1 alternate) $ sepBy1 regexpTermParser (char '|')
         char '-'
         hi <- anyChar
         return $ range (lo, hi)
-    builtInRanges = charCode [('n',"\n"), ('t',"\t"), ('w', wordChars), ('s', spaceChars), ('d', digitChars)]
-    charCode cs = char '\\' >> choice [char c >> return x | (c, x) <- cs]
-    dot = char '.' >> return (range (chr 0, chr 255))
 
     -- gets postfix operators on regexes
     modifier :: ENFA -> Parser ENFA
@@ -322,20 +320,26 @@ regexpParser = liftM (foldr1 alternate) $ sepBy1 regexpTermParser (char '|')
                  <|> (char '+' >> return repeat1)
                  <|> (char '?' >> return optional)
                  <|> (return id)
+    classes = choice . map (\(code, cls) -> try (string code) >> return cls)
 
     regexpTermParser = liftM (foldr1 append) $ many (
             (try parens
              <|> try charClassParser
-             <|> try (liftM alternateSingle (builtInRanges <|> dot))
-             <|> (liftM singletonEnfa $ escapeParser "|()[]+?*.")
+             <|> try (liftM alternateSingle $ classes allCharacterClasses)
+             <|> liftM singletonEnfa (escapeParser "|()[]+?*.")
             ) >>= modifier)
 
-spaceChars :: String
-spaceChars = " \t\n"
-digitChars :: String
-digitChars = "0123456789"
-wordChars :: String
-wordChars  = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+allCharacterClasses :: [(String, String)]
+allCharacterClasses = (".", range (chr 0, chr 255)) : characterClasses
+
+characterClasses :: [(String, String)]
+characterClasses =
+    [ ("\\n", "\n")
+    , ("\\t", "\t")
+    , ("\\w", " \t\n")
+    , ("\\s", "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_")
+    , ("\\d", "0123456789")
+    ]
 
 escapeParser :: [Char] -> Parser Char
 -- parses any character, except unescaped versions of any character in
