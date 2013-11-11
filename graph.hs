@@ -86,4 +86,4 @@ gStyle = [ gAttrs
 
 graphToDotPng :: (Ord a, PrintDot a, ParseDot a) => FilePath -> DotGraph a -> IO Bool
 graphToDotPng fpre g = handle (\(_::GraphvizException) -> return False)
-                       $ addExtension (runGraphviz g) Png fpre >> return True
+                       $ addExtension (runGraphviz g) Pdf fpre >> return True
