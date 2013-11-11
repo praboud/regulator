@@ -336,8 +336,8 @@ characterClasses :: [(String, String)]
 characterClasses =
     [ ("\\n", "\n")
     , ("\\t", "\t")
-    , ("\\w", " \t\n")
-    , ("\\s", "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz")
+    , ("\\s", " \t\n")
+    , ("\\w", "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_abcdefghijklmnopqrstuvwxyz")
     , ("\\d", "0123456789")
     ]
 

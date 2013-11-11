@@ -14,6 +14,7 @@ import Data.Maybe (isJust, fromJust)
 import Data.List (groupBy, sortBy, sort)
 import Data.List.Ordered (nub)
 import Data.Tuple (swap)
+import Data.Char (showLitChar)
 import qualified Data.Set as Set
 -- import Control.Exception (handle)
 import System.Environment (getArgs)
@@ -44,9 +45,17 @@ dfaToDotParams params (DFA ts _ _) = graphElemsToDot params ns es
     consolidateEdges es@(((from, _), to): _) = (from, fromJust to, label)
         where
         symbols = sort $ map (\((_, c), _) -> c) es
-        label = case lookup symbols $ map swap allCharacterClasses of
-            Just name -> name
-            Nothing -> '[' : symbols ++ "]"
+        label = '[' : (findClosestClass symbols) ++ "]"
+    classes = ("", Set.empty) : map (\(name, syms) -> (name, Set.fromList syms)) allCharacterClasses
+    findClosestClass symbols = clsName
+                               ++ (foldr showLitChar "" $ Set.toList (Set.difference symbolSet clsSet))
+                               ++ (foldr (\s a -> ('^':) $ showLitChar s a) "" $ Set.toList (Set.difference clsSet symbolSet))
+        where
+        (clsName, clsSet, _) = match
+        match = head $ sortBy (\(_, _, s1) (_, _, s2) -> compare s1 s2)
+            $ map (\(name, set) -> (name, set, Set.size $ diff symbolSet set)) classes
+        symbolSet = Set.fromList symbols
+        diff a b = Set.difference (Set.union a b) (Set.intersection a b)
 
 dfaParams :: DFA -> GraphvizParams Int () String () ()
 dfaParams (DFA _ q as) = defaultParams
@@ -70,7 +79,7 @@ gStyle = [ gAttrs
     gAttrs = GraphAttrs
         [RankDir FromLeft
         , Splines SplineEdges
-        , FontName "courier"
+        , FontName "terminus"
         , Size $ GSize { width = 100, height = Nothing, desiredSize = True }
         , Concentrate True
         ]
