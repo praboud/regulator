@@ -7,13 +7,11 @@ import Data.GraphViz hiding (parse)
 import Data.GraphViz.Attributes.Complete
 import Data.GraphViz.Exception
 import Control.Arrow(second)
-import Control.Monad (liftM)
 import Data.Array (bounds, assocs)
 import Data.Ix (range)
 import Data.Maybe (isJust, fromJust)
 import Data.List (groupBy, sortBy, sort)
 import Data.List.Ordered (nub)
-import Data.Tuple (swap)
 import Data.Char (showLitChar)
 import qualified Data.Set as Set
 -- import Control.Exception (handle)
@@ -21,12 +19,32 @@ import System.Environment (getArgs)
 
 main :: IO ()
 main = do
-    [lexFilePath, outFilePath] <- getArgs
+    args <- getArgs
+    (dfa, outPath) <- case args of
+        [lexerPath, outPath] -> getDfaFromLexer lexerPath >>= passBack outPath
+        [outPath] -> getDfaFromRegex >>= passBack outPath
+        _ -> fail "Unknown arguments specified"
+    case dfa of
+        Just dfa' -> (graphToDotPng outPath $ dfaToDot dfa') >>= print
+        Nothing -> fail "Could not parse expression into DFA"
+    where
+    passBack outPath dfa = return (dfa, outPath)
+
+getDfaFromLexer :: FilePath -> IO(Maybe DFA)
+getDfaFromLexer lexFilePath = do
     lexfile <- readFile lexFilePath
     case parse lexerParser "lexer" lexfile of
-        Right lexer -> (graphToDotPng outFilePath $ dfaToDot dfa) >>= print
+        Right lexer -> return $ Just dfa
             where (LexerDFA dfa _) = compileLexer lexer
-        Left err -> print err
+        Left _ -> return Nothing
+
+getDfaFromRegex :: IO(Maybe DFA)
+getDfaFromRegex = do
+    regex <- getLine
+    case parse regexpParser "regex" regex of
+        Right enfa -> return $ Just $ compileEnfaToDfa enfa
+        Left _ -> return Nothing
+
 
 dfaToDot :: DFA -> DotGraph Int
 dfaToDot dfa = dfaToDotParams (dfaParams dfa) dfa
@@ -42,9 +60,9 @@ dfaToDotParams params (DFA ts _ _) = graphElemsToDot params ns es
          $ sortBy (byEdge compare)
          $ filter (isJust . snd) $ assocs ts
     byEdge f ((from1, _), to1) ((from2, _), to2) = f (from1, to1) (from2, to2)
-    consolidateEdges es@(((from, _), to): _) = (from, fromJust to, label)
+    consolidateEdges edges@(((from, _), to): _) = (from, fromJust to, label)
         where
-        symbols = sort $ map (\((_, c), _) -> c) es
+        symbols = sort $ map (\((_, c), _) -> c) edges
         label = '[' : (findClosestClass symbols) ++ "]"
     classes = ("", Set.empty) : map (\(name, syms) -> (name, Set.fromList syms)) allCharacterClasses
     findClosestClass symbols = clsName
@@ -77,7 +95,7 @@ gStyle = [ gAttrs
          ]
     where
     gAttrs = GraphAttrs
-        [RankDir FromLeft
+        [ RankDir FromLeft
         , Splines SplineEdges
         , FontName "terminus"
         , Size $ GSize { width = 100, height = Nothing, desiredSize = True }
