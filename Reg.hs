@@ -12,7 +12,10 @@ module Reg
     , lexerTokenize
     , LexerDFA(LexerDFA)
     , DFA(DFA)
+    , ENFA(ENFA)
     , allCharacterClasses
+    , enfaStateSet
+    , sortAndGroupBy
     ) where
 
 
@@ -147,8 +150,9 @@ type DFAState = State
  - and outs of ENFAs and DFAs before looking at this
  -}
 compileEnfaToDfaExtra :: ENFA -> (DFA, Map Int (Set State))
-compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray (fromJust $ Map.lookup (Set.singleton q0) stateToCode) acceptStates, codeToState)
+compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray dfaStart acceptStates, codeToState)
     where
+    dfaStart = (stateToCode Map.!) $ head $ filter (Set.member q0) states
 
     -- get a list of all symbols in use
     syms = concatMap (mapMaybe id . Map.keys) $ Map.elems ts
@@ -178,7 +182,7 @@ compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray (fromJust $ Map.loo
     codeToState :: Map DFAState (Set ENFAState)
     codeToState = foldr (\(qs, i) m -> Map.insert i qs m) Map.empty $ zip states [0..]
 
-    transitions = compressDFAMap $ buildTransitions Map.empty $ Set.singleton q0
+    transitions = compressDFAMap as $ buildTransitions Map.empty $ Set.singleton q0
     -- every state used in the transitions "proto-dfa"
     states = Set.toList $ Map.foldr (flip $ Map.foldr Set.insert) (Map.keysSet transitions) transitions
 
@@ -210,8 +214,10 @@ compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray (fromJust $ Map.loo
         neighbours = Set.foldr (\q m -> Map.unionWith Set.union m $ nonEmptyTransitions q) Map.empty equivalentqs
 
 -- remove duplicate states: those that have exactly the same outbound transitions
-compressDFAMap :: DFAMap -> DFAMap
-compressDFAMap = Map.fromList . reduce . Map.toList
+-- TODO: we also need to consider if the states are both accept
+-- for lexers, we must consider if the states translate into accepting the same token
+compressDFAMap :: Set State -> DFAMap -> DFAMap
+compressDFAMap as = Map.fromList . reduce . Map.toList
     where
     -- reduce :: DFAMap -> DFAMap
     reduce :: [(Set State, Map Symbol (Set State))] -> [(Set State, Map Symbol (Set State))]
@@ -220,16 +226,16 @@ compressDFAMap = Map.fromList . reduce . Map.toList
         | otherwise = reduce $ map (\(q, ts) -> (remap q, Map.map remap ts)) reduced
         where
         (reduced, mappingList) = unzip $ map (\xs@(x:rs) -> (x, case rs of {[] -> Map.empty; _ -> constructReplacement $ map fst xs}))
-                                 $ groupBy (byTrans (==)) $ sortBy (byTrans compare) dfaml
+                                 $ sortAndGroupBy (\(s, ts) -> (Set.null $ Set.intersection s as, ts)) dfaml
         mapping = foldr1 Map.union mappingList
         remap q = fromMaybe q $ Map.lookup q mapping
-
-    byTrans :: (x -> x -> y) -> (z, x) -> (z, x) -> y
-    byTrans f a b = f (snd a) (snd b)
 
     constructReplacement :: [Set State] -> Map (Set State) (Set State)
     constructReplacement xs = foldr (\x ac -> Map.insert x common ac) Map.empty xs
         where common = foldr1 Set.union xs
+
+sortAndGroupBy :: Ord b => (a -> b) -> [a] -> [[a]]
+sortAndGroupBy f = groupBy (\x y -> (f x) == (f y)) . sortBy (\x y -> compare (f x) (f y))
 
 
 {- ENFA helpers, used by combinators and compiler -}
