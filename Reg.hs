@@ -13,6 +13,7 @@ module Reg
     , LexerDFA(LexerDFA)
     , DFA(DFA)
     , ENFA(ENFA)
+    , characterClasses
     , allCharacterClasses
     , enfaStateSet
     , sortAndGroupBy
@@ -32,6 +33,8 @@ import Data.Char (toUpper, chr)
 
 import Control.Monad (foldM, liftM, (>=>))
 import Text.ParserCombinators.Parsec hiding (optional, State)
+
+import Debug.Trace
 
 
 {- high level documentation things
@@ -158,8 +161,9 @@ compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray dfaStart acceptStat
     syms = concatMap (mapMaybe id . Map.keys) $ Map.elems ts
 
     -- get bounds on those symbols
-    maxSym = maximum syms
-    minSym = minimum syms
+    (minSym, maxSym) = case syms of
+        [] -> (chr 0, chr 0)
+        _ -> (minimum syms, maximum syms)
 
     -- build up the actual 2D array which defines, given the current state
     -- and symbol seen by the matching process, which symbol to go to next
@@ -318,12 +322,13 @@ alternateSingle cs = ENFA ts 0 (Set.singleton 1)
 singletonEnfa :: Symbol -> ENFA
 singletonEnfa c = ENFA (Map.singleton 0 (Map.singleton (Just c) (Set.singleton 1))) 0 (Set.singleton 1)
 
--- emptyEnfa = ENFA Map.empty 0 (Set.singleton 0)
+emptyEnfa :: ENFA
+emptyEnfa = ENFA Map.empty 0 (Set.singleton 0)
 
 {- parser related things, turn string/regex into ENFA -}
 
 regexpParser :: Parser ENFA
-regexpParser = liftM (foldr1 alternate) $ sepBy1 regexpTermParser (char '|')
+regexpParser = liftM (foldr alternate emptyEnfa) $ sepBy1 regexpTermParser (char '|')
     where
     parens = between (char '(') (char ')') regexpParser
     -- parse a character range like [abc], or [a-zA-Z]
@@ -358,7 +363,7 @@ regexpParser = liftM (foldr1 alternate) $ sepBy1 regexpTermParser (char '|')
 
     classes = choice . map (\(code, cls) -> try (string code) >> return cls)
 
-    regexpTermParser = liftM (foldr1 append) $ many (
+    regexpTermParser = liftM (foldr append emptyEnfa) $ many (
             (try parens
              <|> try charClassParser
              <|> try (liftM alternateSingle $ classes allCharacterClasses)
@@ -366,7 +371,7 @@ regexpParser = liftM (foldr1 alternate) $ sepBy1 regexpTermParser (char '|')
             ) >>= modifier)
 
 allCharacterClasses :: [(String, String)]
-allCharacterClasses = (".", range (chr 0, chr 255)) : characterClasses
+allCharacterClasses = (".", range (chr 0, chr 127)) : characterClasses
 
 characterClasses :: [(String, String)]
 characterClasses =
@@ -380,9 +385,7 @@ characterClasses =
 escapeParser :: String -> Parser Char
 -- parses any character, except unescaped versions of any character in
 -- the list provided
--- nb: we never allow newlines
--- should probably extend this to any non-printable
-escapeParser cs = (char esc >> oneOf (esc : cs)) <|> noneOf ('\n' : cs)
+escapeParser cs = (char esc >> oneOf (esc : cs)) <|> noneOf cs
     where esc = '\\'
 
 {- things dealing with language lexers -}

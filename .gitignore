@@ -4,4 +4,5 @@ genLex
 match
 testLex
 graph
+Tests
 dist/
