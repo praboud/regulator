@@ -1,10 +1,9 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-import Reg (regexpParser, compileEnfaToDfa, DFA(DFA),
-            allCharacterClasses, ENFA(ENFA), sortAndGroupBy,
-            enfaStateSet,
-            LexerDFA(LexerDFA), compileLexer, lexerParser)
+import Regulate (regexpParser, compileEnfaToDfa, DFA(DFA), allCharacterClasses,
+                 ENFA(ENFA), sortAndGroupBy, enfaStateSet, LexerDFA(LexerDFA),
+                 compileLexer, lexerParser)
 import Text.ParserCombinators.Parsec (parse)
 import Data.GraphViz hiding (parse)
 import Data.GraphViz.Attributes.Complete
@@ -14,12 +13,11 @@ import Control.Arrow(second)
 import Data.Array (bounds, assocs)
 import Data.Ix (range)
 import Data.Maybe (isJust, fromJust)
-import Data.List (groupBy, sortBy, sort, partition)
+import Data.List (sortBy, sort, partition)
 import Data.List.Ordered (nub)
 import Data.Char (showLitChar)
 import qualified Data.Set as Set
 import qualified Data.Map as Map
--- import Control.Exception (handle)
 import System.Environment (getArgs)
 
 main :: IO ()
@@ -34,8 +32,6 @@ main = do
     case dot of
         Just dot' -> graphToDotPng outPath dot' >>= print
         Nothing -> fail "Could not parse expression into DFA"
-    where
-    passBack outPath dfa = return (dfa, outPath)
 
 getDfaFromLexer :: String -> Maybe DFA
 getDfaFromLexer lexStr = do
@@ -45,7 +41,8 @@ getDfaFromLexer lexStr = do
         Left _ -> Nothing
 
 getEnfaFromRegex :: String -> Maybe ENFA
-getEnfaFromRegex = either (const Nothing) Just . parse regexpParser "regex"
+getEnfaFromRegex = either (const Nothing) Just . parse regexpParser "regex" . rstrip
+    where rstrip = reverse . dropWhile (=='\n') . reverse
 
 dfaToDot :: DFA -> DotGraph Int
 dfaToDot dfa@(DFA ts _ _) = graphElemsToDot (dfaParams dfa) ns es
@@ -71,7 +68,7 @@ enfaToDot enfa@(ENFA ts _ _)  = graphElemsToDot (enfaParams enfa) ns es
     es = (groupEdges $ map (\(from, to, c) -> (from, to, fromJust c)) nonEpsilon) ++ (map (\(from, to, _) -> (from, to, "None")) epsilon)
     (nonEpsilon, epsilon) = partition (\(_, _, c) -> isJust c) res
     res :: [(Int, Int, Maybe Char)]
-    res = Map.foldrWithKey (\from ts' ac -> Map.foldrWithKey (\c tos ac' -> Set.foldr (\to ac'' -> (from, to, c) : ac') ac' tos) ac ts') [] ts
+    res = Map.foldrWithKey (\from ts' ac -> Map.foldrWithKey (\c tos ac' -> Set.foldr (\to ac'' -> (from, to, c) : ac'') ac' tos) ac ts') [] ts
 
 classes :: [(String, Set.Set Char)]
 classes = ("", Set.empty) : map (\(name, syms) -> (name, Set.fromList syms)) allCharacterClasses

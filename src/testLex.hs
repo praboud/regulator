@@ -1,4 +1,4 @@
-import Reg (lexerParser, compileLexer, lexerTokenize)
+import Regulate (lexerParser, compileLexer, lexerTokenize)
 import Text.ParserCombinators.Parsec (parse)
 import System.Environment
 import Control.Monad (liftM)

@@ -1,4 +1,4 @@
-import Reg (lexerParser, compileLexer, LexerDFA(LexerDFA), DFA(DFA))
+import Regulate (lexerParser, compileLexer, LexerDFA(LexerDFA), DFA(DFA))
 import Text.ParserCombinators.Parsec (parse)
 import Data.List (intercalate, nub)
 import Text.Printf (printf)

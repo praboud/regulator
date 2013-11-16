@@ -2,7 +2,7 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE FlexibleInstances #-}
 
-module Reg
+module Regulate
     ( regexpParser
     , lexerParser
     , compileEnfaToDfa
@@ -221,7 +221,7 @@ compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray dfaStart acceptStat
 -- TODO: we also need to consider if the states are both accept
 -- for lexers, we must consider if the states translate into accepting the same token
 compressDFAMap :: Set State -> DFAMap -> DFAMap
-compressDFAMap as = Map.fromList . reduce . Map.toList
+compressDFAMap as = id --Map.fromList . reduce . Map.toList
     where
     -- reduce :: DFAMap -> DFAMap
     reduce :: [(Set State, Map Symbol (Set State))] -> [(Set State, Map Symbol (Set State))]
@@ -322,8 +322,13 @@ alternateSingle cs = ENFA ts 0 (Set.singleton 1)
 singletonEnfa :: Symbol -> ENFA
 singletonEnfa c = ENFA (Map.singleton 0 (Map.singleton (Just c) (Set.singleton 1))) 0 (Set.singleton 1)
 
+-- enfa that accepts the empty string
+emptyEnfaAccept :: ENFA
+emptyEnfaAccept = ENFA Map.empty 0 (Set.singleton 0)
+
+-- enfa that accepts no strings
 emptyEnfa :: ENFA
-emptyEnfa = ENFA Map.empty 0 (Set.singleton 0)
+emptyEnfa = ENFA Map.empty 0 Set.empty
 
 {- parser related things, turn string/regex into ENFA -}
 
@@ -363,7 +368,7 @@ regexpParser = liftM (foldr alternate emptyEnfa) $ sepBy1 regexpTermParser (char
 
     classes = choice . map (\(code, cls) -> try (string code) >> return cls)
 
-    regexpTermParser = liftM (foldr append emptyEnfa) $ many (
+    regexpTermParser = liftM (foldr append emptyEnfaAccept) $ many (
             (try parens
              <|> try charClassParser
              <|> try (liftM alternateSingle $ classes allCharacterClasses)

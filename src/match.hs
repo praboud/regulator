@@ -1,4 +1,4 @@
-import Reg (regexpParser, compileEnfaToDfa, accept)
+import Regulate (regexpParser, compileEnfaToDfa, accept)
 import Text.ParserCombinators.Parsec (parse)
 import Data.Maybe (isJust)
 
