@@ -1,10 +1,9 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-import Regulate (regexpParser, compileEnfaToDfa, DFA(DFA), allCharacterClasses,
+import Regulate (regexParse, compileEnfaToDfa, DFA(DFA), allCharacterClasses,
                  ENFA(ENFA), sortAndGroupBy, enfaStateSet, LexerDFA(LexerDFA),
-                 compileLexer, lexerParser)
-import Text.ParserCombinators.Parsec (parse)
+                 compileLexer, lexerParse)
 import Data.GraphViz hiding (parse)
 import Data.GraphViz.Attributes.Complete
 import Data.GraphViz.Exception
@@ -35,13 +34,13 @@ main = do
 
 getDfaFromLexer :: String -> Maybe DFA
 getDfaFromLexer lexStr = do
-    case parse lexerParser "lexer" lexStr of
+    case lexerParse lexStr of
         Right lexer -> Just dfa
             where (LexerDFA dfa _) = compileLexer lexer
         Left _ -> Nothing
 
 getEnfaFromRegex :: String -> Maybe ENFA
-getEnfaFromRegex = either (const Nothing) Just . parse regexpParser "regex" . rstrip
+getEnfaFromRegex = either (const Nothing) Just . regexParse . rstrip
     where rstrip = reverse . dropWhile (=='\n') . reverse
 
 dfaToDot :: DFA -> DotGraph Int

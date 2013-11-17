@@ -3,8 +3,8 @@
 {-# LANGUAGE FlexibleInstances #-}
 
 module Regulate
-    ( regexpParser
-    , lexerParser
+    ( regexParse
+    , lexerParse
     , compileEnfaToDfa
     , compileLexer
     , accept
@@ -33,9 +33,6 @@ import Data.Char (toUpper, chr)
 
 import Control.Monad (foldM, liftM, (>=>))
 import Text.ParserCombinators.Parsec hiding (optional, State)
-
-import Debug.Trace
-
 
 {- high level documentation things
  -
@@ -178,7 +175,7 @@ compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray dfaStart acceptStat
                                           >>= Map.lookup c
                                           >>= flip Map.lookup stateToCode))
                       $ range arrayBounds
-    arrayBounds = ((0, minSym), (Map.size transitions - 1, maxSym))
+    arrayBounds = ((0, minSym), (length states - 1, maxSym))
 
     -- for converting between ENFA state sets and DFA states
     stateToCode :: Map (Set ENFAState) DFAState
@@ -186,57 +183,68 @@ compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray dfaStart acceptStat
     codeToState :: Map DFAState (Set ENFAState)
     codeToState = foldr (\(qs, i) m -> Map.insert i qs m) Map.empty $ zip states [0..]
 
-    transitions = compressDFAMap as $ buildTransitions Map.empty $ Set.singleton q0
+    transitions = compressDFAMap as $ buildTransitions Map.empty $ epsilonClosure ts q0
     -- every state used in the transitions "proto-dfa"
     states = Set.toList $ Map.foldr (flip $ Map.foldr Set.insert) (Map.keysSet transitions) transitions
 
     acceptStates :: Set DFAState
     -- take accept states and add all states that can reach an accept state
     -- via an epsilon transition -- (ie: include the accept state in their epsilon closure)
-    acceptStates = Map.foldrWithKey (\qs c ac -> if isAccept qs then Set.insert c ac else ac) Set.empty stateToCode
-        where
-        isAccept qs = any (overlap as . epsilonClosure ts) $ Set.toList qs
+    acceptStates = Map.foldrWithKey (\qs c ac -> (if overlap as qs then Set.insert c else id) ac) Set.empty stateToCode
 
     overlap :: Ord x => Set x -> Set x -> Bool
     overlap x y = not $ Set.null $ Set.intersection x y
 
+    -- expands possible states to any reachable by an epsilon transition
+    epsilonClosureForSet :: Set State -> Set State
+    epsilonClosureForSet = Set.foldr (\s ss -> Set.union ss $ epsilonClosure ts s) Set.empty
+
     -- build up a graph which is essentially a dfa whose states are sets of
-    -- ENFA states
-    -- accomplish this by walking the ENFA starting at the start state
+    -- ENFA states. We consider starting at the start state of the enfa
+    -- and following all possible routes, building up a dfa as we go.
+    -- If there are multiple transitions from the same state on the same symbol,
+    -- then we take all of them, and essentially are in all possible states
+    -- simultaneously
     buildTransitions :: DFAMap -> Set State -> DFAMap
     buildTransitions ts' qs
         | Map.member qs ts' = ts' -- we have already encountered that state, do nothing
         | otherwise = Map.foldr (flip buildTransitions) (Map.insert qs neighbours ts') neighbours
         where
-        equivalentqs :: Set State
-        equivalentqs = Set.foldr (\s ss -> Set.union ss $ epsilonClosure ts s) Set.empty qs
-
         nonEmptyTransitions :: State -> Map Symbol (Set State)
         nonEmptyTransitions = maybe Map.empty (Map.mapKeysMonotonic fromJust . Map.filterWithKey (\k _ -> isJust k)) . flip Map.lookup ts
 
+        -- all transitions available from qs' (see above)
         neighbours :: Map Symbol (Set State)
-        neighbours = Set.foldr (\q m -> Map.unionWith Set.union m $ nonEmptyTransitions q) Map.empty equivalentqs
+        neighbours = Map.map epsilonClosureForSet
+                     $ Set.foldr (\q m -> Map.unionWith Set.union m $ nonEmptyTransitions q) Map.empty qs
 
 -- remove duplicate states: those that have exactly the same outbound transitions
--- TODO: we also need to consider if the states are both accept
--- for lexers, we must consider if the states translate into accepting the same token
+-- TODO: for lexers, we must consider if the states translate into accepting the same token
+type ENFAList = [(Set State, Map Symbol (Set State))]
 compressDFAMap :: Set State -> DFAMap -> DFAMap
-compressDFAMap as = id --Map.fromList . reduce . Map.toList
+compressDFAMap as = Map.fromList . reduce . Map.toList
     where
-    -- reduce :: DFAMap -> DFAMap
-    reduce :: [(Set State, Map Symbol (Set State))] -> [(Set State, Map Symbol (Set State))]
+    reduce :: ENFAList -> ENFAList
     reduce dfaml
         | Map.null mapping = dfaml
-        | otherwise = reduce $ map (\(q, ts) -> (remap q, Map.map remap ts)) reduced
+        | otherwise = reduce $ map (\(q, ts) -> (q, Map.map remap ts)) reduced
         where
-        (reduced, mappingList) = unzip $ map (\xs@(x:rs) -> (x, case rs of {[] -> Map.empty; _ -> constructReplacement $ map fst xs}))
-                                 $ sortAndGroupBy (\(s, ts) -> (Set.null $ Set.intersection s as, ts)) dfaml
-        mapping = foldr1 Map.union mappingList
+        -- get a reduced list of states, as well as a mapping of the states
+        -- removed to their equivalent states
+        -- remove all states that have another state with the same output transitions,
+        -- and that are both accept states
+        (reduced, mapping) = foldr processDuplicates ([], Map.empty)
+                             $ sortAndGroupBy (\(s, ts) -> (Set.null $ Set.intersection s as, ts)) dfaml
         remap q = fromMaybe q $ Map.lookup q mapping
 
-    constructReplacement :: [Set State] -> Map (Set State) (Set State)
-    constructReplacement xs = foldr (\x ac -> Map.insert x common ac) Map.empty xs
-        where common = foldr1 Set.union xs
+    processDuplicates :: ENFAList -> (ENFAList, Map (Set State) (Set State)) -> (ENFAList, Map (Set State) (Set State))
+    processDuplicates xs@((_, ts):_) (ys, mapping) = ((common, ts):ys, mapping')
+        where
+        mapping' = case xs of
+            [_] -> mapping
+            _ -> foldr (flip Map.insert common) mapping $ map fst xs
+        common :: Set State
+        common = foldr1 Set.union $ map fst xs
 
 sortAndGroupBy :: Ord b => (a -> b) -> [a] -> [[a]]
 sortAndGroupBy f = groupBy (\x y -> (f x) == (f y)) . sortBy (\x y -> compare (f x) (f y))
@@ -332,10 +340,13 @@ emptyEnfa = ENFA Map.empty 0 Set.empty
 
 {- parser related things, turn string/regex into ENFA -}
 
-regexpParser :: Parser ENFA
-regexpParser = liftM (foldr alternate emptyEnfa) $ sepBy1 regexpTermParser (char '|')
+regexParse :: String -> Either ParseError ENFA
+regexParse = parse regexParser "regex"
+
+regexParser :: Parser ENFA
+regexParser = liftM (foldr alternate emptyEnfa) $ sepBy1 regexpTermParser (char '|')
     where
-    parens = between (char '(') (char ')') regexpParser
+    parens = between (char '(') (char ')') regexParser
     -- parse a character range like [abc], or [a-zA-Z]
     -- alternate between any 1 single character
     charClassParser :: Parser ENFA
@@ -395,12 +406,15 @@ escapeParser cs = (char esc >> oneOf (esc : cs)) <|> noneOf cs
 
 {- things dealing with language lexers -}
 
+lexerParse :: String -> Either ParseError LexerENFA
+lexerParse = parse lexerParser "lexer"
+
 lexerParser :: Parser LexerENFA
 lexerParser = sepEndBy1
     (do
         name <- many1 alphaNum
         skipMany1 space
-        enfa <- regexpParser
+        enfa <- regexParser
         return (enfa, name))
     (char '\n')
 
