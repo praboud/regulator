@@ -158,9 +158,11 @@ compressDFAMap as = Map.fromList . reduce . Map.toList
         remap q = fromMaybe q $ Map.lookup q mapping
 
     processDuplicates :: ENFAList -> (ENFAList, Map (Set State) (Set State)) -> (ENFAList, Map (Set State) (Set State))
+    processDuplicates [] _ = undefined
     processDuplicates xs@((_, ts):_) (ys, mapping) = ((common, ts):ys, mapping')
         where
         mapping' = case xs of
+            [] -> undefined
             [_] -> mapping
             _ -> foldr (flip Map.insert common . fst) mapping xs
         common :: Set State

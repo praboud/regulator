@@ -23,6 +23,7 @@ library
                        parsec >=3.1 && <3.2
   default-language:    Haskell2010
   hs-source-dirs:      lib
+  ghc-options:         -Wall -Werror
   exposed-modules:     Regulate,
                        Regulate.Dfa,
                        Regulate.Enfa,
@@ -38,6 +39,7 @@ executable regulate-match
                        regulate
   default-language:    Haskell2010
   hs-source-dirs:      src
+  ghc-options:         -Wall -Werror
 
 executable regulate-graph
   main-is: graph.hs
@@ -50,6 +52,7 @@ executable regulate-graph
                        regulate
   default-language:    Haskell2010
   hs-source-dirs:      src
+  ghc-options:         -Wall -Werror
 
 executable regulate-genlex
   main-is: genLex.hs
@@ -59,6 +62,7 @@ executable regulate-genlex
                        regulate
   default-language:    Haskell2010
   hs-source-dirs:      src
+  ghc-options:         -Wall -Werror
 
 executable regulate-testlex
   main-is: testLex.hs
@@ -66,6 +70,7 @@ executable regulate-testlex
                        regulate
   default-language:    Haskell2010
   hs-source-dirs:      src
+  ghc-options:         -Wall -Werror
 
 executable regulate-tests
   main-is: RegulateTests.hs
@@ -76,3 +81,4 @@ executable regulate-tests
                        regulate
   default-language:    Haskell2010
   hs-source-dirs:      test
+  ghc-options:         -Wall -Werror

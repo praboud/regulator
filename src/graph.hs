@@ -54,6 +54,7 @@ dfaToDot dfa@(DFA ts _ _) = graphElemsToDot (dfaParams dfa) ns es
 groupEdges :: (Ord x, Ord y) => [(x, y, Char)] -> [(x, y, String)]
 groupEdges = map consolidateEdges . sortAndGroupOn (\(x, y, _) -> (x, y))
     where
+    consolidateEdges [] = undefined
     consolidateEdges edges@((from, to, _): _) = (from, to, label)
         where
         symbols = sort $ map (\(_, _, c) -> c) edges

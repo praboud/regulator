@@ -30,7 +30,7 @@ regexParser = liftM (foldr alternate emptyEnfa) $ sepBy1 regexpTermParser (char 
     -- alternate between any 1 single character
     charClassParser :: Parser ENFA
     charClassParser = do
-        char '['
+        _ <- char '['
         invert <- optionMaybe $ char '^'
         cs <- liftM concat $ manyTill (try charRange <|> classes characterClasses <|> singleChar) (char ']')
         return $ alternateSingle $ case invert of
@@ -41,7 +41,7 @@ regexParser = liftM (foldr alternate emptyEnfa) $ sepBy1 regexpTermParser (char 
     singleChar = liftM (:[]) $ escapeParser "[]"
     charRange = do
         lo <- anyChar
-        char '-'
+        _ <- char '-'
         hi <- anyChar
         return $ range (lo, hi)
 

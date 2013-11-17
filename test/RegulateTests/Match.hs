@@ -67,6 +67,7 @@ some _ _ [] = listOf1 arbitrary
 some f1 f2 as = some1 as
     where
     len = length as
+    some1 [] = undefined
     some1 [e] = liftM (:[]) $ f1 e
     some1 (e:es) = do
         r <- rand
