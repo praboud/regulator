@@ -3,7 +3,7 @@
 
 import Regulate (parseRegex, compileRegex)
 import Regulate.Types
-import Regulate.Util (sortAndGroupBy)
+import Regulate.Util (sortAndGroupOn)
 import Regulate.Enfa (enfaStateSet)
 import Regulate.Lexer (compileLexer)
 import Regulate.Parse (allCharacterClasses)
@@ -11,16 +11,20 @@ import Regulate.Parse (allCharacterClasses)
 import Data.GraphViz hiding (parse)
 import Data.GraphViz.Attributes.Complete
 import Data.GraphViz.Exception
+
 import Control.Monad (liftM)
 import Control.Arrow(second)
+
 import Data.Array (bounds, assocs)
 import Data.Ix (range)
 import Data.Maybe (isJust, fromJust)
-import Data.List (sortBy, sort, partition)
+import Data.List (sort, partition, minimumBy)
 import Data.List.Ordered (nub)
+import Data.Function (on)
 import Data.Char (showLitChar)
 import qualified Data.Set as Set
 import qualified Data.Map as Map
+
 import System.Environment (getArgs)
 
 main :: IO ()
@@ -48,35 +52,35 @@ dfaToDot dfa@(DFA ts _ _) = graphElemsToDot (dfaParams dfa) ns es
 -- filter out transitions that transition to an error state
 -- group all transitions that go from the same states
 groupEdges :: (Ord x, Ord y) => [(x, y, Char)] -> [(x, y, String)]
-groupEdges = map consolidateEdges . sortAndGroupBy (\(x, y, _) -> (x, y))
+groupEdges = map consolidateEdges . sortAndGroupOn (\(x, y, _) -> (x, y))
     where
     consolidateEdges edges@((from, to, _): _) = (from, to, label)
         where
         symbols = sort $ map (\(_, _, c) -> c) edges
-        label = '[' : (findClosestClass symbols) ++ "]"
+        label = '[' : findClosestClass symbols ++ "]"
 
 enfaToDot :: ENFA -> DotGraph Int
 enfaToDot enfa@(ENFA ts _ _)  = graphElemsToDot (enfaParams enfa) ns es
     where
     ns = map (\q -> (q, ())) $ Set.toList $ enfaStateSet enfa
-    es = (groupEdges $ map (\(from, to, c) -> (from, to, fromJust c)) nonEpsilon) ++ (map (\(from, to, _) -> (from, to, "None")) epsilon)
+    es = groupEdges (map (\(from, to, c) -> (from, to, fromJust c)) nonEpsilon) ++ map (\(from, to, _) -> (from, to, "None")) epsilon
     (nonEpsilon, epsilon) = partition (\(_, _, c) -> isJust c) res
     res :: [(Int, Int, Maybe Char)]
     res = Map.foldrWithKey (\from ts' ac -> Map.foldrWithKey (\c tos ac' -> Set.foldr (\to ac'' -> (from, to, c) : ac'') ac' tos) ac ts') [] ts
 
 classes :: [(String, Set.Set Char)]
-classes = ("", Set.empty) : map (\(name, syms) -> (name, Set.fromList syms)) allCharacterClasses
+classes = ("", Set.empty) : map (second Set.fromList) allCharacterClasses
 
 findClosestClass :: String -> String
 findClosestClass symbols = clsName
-                           ++ (foldr showLitChar "" $ Set.toList (Set.difference symbolSet clsSet))
-                           ++ (foldr (\s a -> ('^':) $ showLitChar s a) "" $ Set.toList (Set.difference clsSet symbolSet))
+                           ++ foldr showLitChar "" (Set.toList (Set.difference symbolSet clsSet))
+                           ++ foldr (\s a -> ('^':) $ showLitChar s a) "" (Set.toList (Set.difference clsSet symbolSet))
     where
     (clsName, clsSet, _) = match
-    match = head $ sortBy (\(_, _, s1) (_, _, s2) -> compare s1 s2)
+    match = minimumBy (compare `on` (\(_, _, x) -> x))
         $ map (\(name, set) -> (name, set, Set.size $ diff symbolSet set)) classes
     symbolSet = Set.fromList symbols
-    diff a b = Set.difference (Set.union a b) (Set.intersection a b)
+    diff a b = Set.difference (a `Set.union` b) (Set.intersection a b)
 
 dfaParams :: DFA -> GraphvizParams Int () String () ()
 dfaParams (DFA _ q as) = defaultParams
@@ -114,7 +118,7 @@ gStyle = [ gAttrs
         [ RankDir FromLeft
         , Splines SplineEdges
         , FontName "terminus"
-        , Size $ GSize { width = 100, height = Nothing, desiredSize = True }
+        , Size GSize { width = 100, height = Nothing, desiredSize = True }
         , Concentrate True
         ]
 

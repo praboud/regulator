@@ -44,7 +44,7 @@ mismatchedString (Simple ss) = some mismatchedChar matchedChar ss
 mismatchedString (Join Alternate rs) = liftM (fromMaybe discard)
                                        $ suchThatMaybe (oneof $ map mismatchedString rs) noMatch
     where
-    noMatch = (\str -> all (flip regexMatches str) rs)
+    noMatch str = all (`regexMatches` str) rs
 mismatchedString (Join Concat rs) = liftM concat $ some mismatchedString matchedString rs
 mismatchedString (Mod op r) = case op of
     Optional -> str'
@@ -54,7 +54,7 @@ mismatchedString (Mod op r) = case op of
     str = mismatchedString r
     str' = suchThat str (not . null)
     -- where str = liftM (fromMaybe discard) $ suchThatMaybe (mismatchedString r) (regexCaseMatches . RegexCase (show r))
-mismatchedString (CharClass ss) = liftM (:[]) $ elements $ range (chr 0, chr 255) \\ (foldr comb [] ss)
+mismatchedString (CharClass ss) = liftM (:[]) $ elements $ range (chr 0, chr 255) \\ foldr comb [] ss
     where
     comb s ac = union ac $ case s of
         Lit c -> [c]
@@ -81,4 +81,4 @@ mismatchedChar (Lit c) = suchThat arbitrary (/=c)
 mismatchedChar (Class _ cs) = case ls of
     [] -> discard
     _ -> elements ls
-    where ls = (range (chr 0, chr 255)) \\ cs
+    where ls = range (chr 0, chr 255) \\ cs

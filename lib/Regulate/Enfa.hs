@@ -51,7 +51,7 @@ append e1@(ENFA ts q0 as) e2 = ENFA ts' q0 bs'
 -- were adjusted by during the computation. for use by the lexer, so even
 -- after adjusting the states, we still know what state is what
 alternateExtra :: ENFA -> ENFA -> (Int, Int, ENFA)
-alternateExtra e1 e2 = (offset1, offset2, ENFA vs 0 (Set.union as' bs'))
+alternateExtra e1 e2 = (offset1, offset2, ENFA vs 0 (as' `Set.union` bs'))
     where
     offset1 = 1
     offset2 = (+1) $ fromIntegral (Set.size $ enfaStateSet e1)

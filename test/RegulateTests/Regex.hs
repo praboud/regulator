@@ -49,7 +49,7 @@ data Symbol = Lit Char | Class String String
 instance Show Regex where
     show (Simple ss) = concatMap show ss
     show (Join op rs) = intercalate (show op) $ map (parens . show) rs
-    show (Mod op r) = (parens $ show r) ++ show op
+    show (Mod op r) = parens (show r) ++ show op
     show (CharClass ss) = '[' : concatMap show ss ++ "]"
 
 instance Show ModOp where

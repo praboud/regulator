@@ -16,10 +16,11 @@ import Data.Maybe (fromJust, isJust, isNothing, fromMaybe, mapMaybe)
 import Data.Char (chr)
 
 import Control.Monad (foldM, (>=>))
+import Control.Arrow (second)
 
 import Regulate.Enfa (epsilonClosure)
 import Regulate.Types
-import Regulate.Util (sortAndGroupBy)
+import Regulate.Util (sortAndGroupOn)
 
 
 {- is a string accepted by the regex defined by the dfa?
@@ -146,14 +147,14 @@ compressDFAMap as = Map.fromList . reduce . Map.toList
     reduce :: ENFAList -> ENFAList
     reduce dfaml
         | Map.null mapping = dfaml
-        | otherwise = reduce $ map (\(q, ts) -> (q, Map.map remap ts)) reduced
+        | otherwise = reduce $ map (second (Map.map remap)) reduced
         where
         -- get a reduced list of states, as well as a mapping of the states
         -- removed to their equivalent states
         -- remove all states that have another state with the same output transitions,
         -- and that are both accept states
         (reduced, mapping) = foldr processDuplicates ([], Map.empty)
-                             $ sortAndGroupBy (\(s, ts) -> (Set.null $ Set.intersection s as, ts)) dfaml
+                             $ sortAndGroupOn (\(s, ts) -> (Set.null $ Set.intersection s as, ts)) dfaml
         remap q = fromMaybe q $ Map.lookup q mapping
 
     processDuplicates :: ENFAList -> (ENFAList, Map (Set State) (Set State)) -> (ENFAList, Map (Set State) (Set State))
@@ -161,6 +162,6 @@ compressDFAMap as = Map.fromList . reduce . Map.toList
         where
         mapping' = case xs of
             [_] -> mapping
-            _ -> foldr (flip Map.insert common) mapping $ map fst xs
+            _ -> foldr (flip Map.insert common . fst) mapping xs
         common :: Set State
         common = foldr1 Set.union $ map fst xs

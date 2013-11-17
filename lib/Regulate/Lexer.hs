@@ -54,7 +54,7 @@ compileLexerEnfa toks = LexerDFA dfa $ Map.map getKind codeToState
         then "NIL"
         else (map toUpper . intercalate "_OR_" . Set.toList) filt
         where
-        filt = setMapMaybe (flip Map.lookup acceptNames) qs'
+        filt = setMapMaybe (`Map.lookup` acceptNames) qs'
         qs' = Set.foldr (\q qs'' -> Set.union qs'' $ epsilonClosure ts q) Set.empty qs
 
     combine :: (ENFA, Map Int String) -> (ENFA, String) -> (ENFA, Map Int String)
