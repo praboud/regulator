@@ -24,7 +24,7 @@ regexCaseMatches :: RegexCase -> Bool
 regexCaseMatches (RegexCase reg match) = regexMatches reg match
 
 regexMatches :: (Show a) => a -> String -> Bool
-regexMatches regex match = maybe False (isJust . flip accept match) $ toDfa regex
+regexMatches regex match = testRegexDfa (isJust . flip accept match) regex
 
 matchedString :: Regex -> Gen String
 matchedString (Simple ss) = mapM matchedChar ss

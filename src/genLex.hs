@@ -1,4 +1,5 @@
-import Regulate (lexerParse, compileLexer, LexerDFA(LexerDFA), DFA(DFA))
+import Regulate.Types (LexerDFA(LexerDFA), DFA(DFA))
+import Regulate.Lexer (compileLexer)
 import Data.List (intercalate, nub)
 import Text.Printf (printf)
 import Data.Ix (Ix, range, inRange)
@@ -38,6 +39,6 @@ toCpp (LexerDFA (DFA ts q0 _) as) = header ++ def ++ q0' ++ "\n" ++ ts' ++ "\n" 
 main :: IO()
 main = do
     contents <- getContents
-    case lexerParse contents of
-        Right lexer -> print $ toCpp $ compileLexer lexer
+    case compileLexer contents of
+        Right lexer -> print $ toCpp lexer
         Left err -> print err

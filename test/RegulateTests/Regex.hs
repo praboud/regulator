@@ -3,14 +3,13 @@ module RegulateTests.Regex where
 import Test.QuickCheck
 import Control.Monad (liftM)
 import Data.Char (isPrint, isAscii)
-import Regulate (DFA, allCharacterClasses, characterClasses, regexParse, compileEnfaToDfa)
+import Regulate.Types (DFA)
+import Regulate.Parse (allCharacterClasses, characterClasses)
+import Regulate (compileRegex)
 import Data.List (intercalate)
 
-toDfa :: Show a => a -> Maybe DFA
-toDfa = either (const Nothing) (Just . compileEnfaToDfa) . regexParse . show
-
 testRegexDfa :: Show a => (DFA -> Bool) -> a -> Bool
-testRegexDfa f = maybe False f . toDfa
+testRegexDfa f = either (const False) f . compileRegex . show
 
 instance Arbitrary Regex where
     -- this does not represent the full domain of input regexes; potential problems:

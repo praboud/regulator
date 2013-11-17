@@ -1,10 +1,9 @@
-import Regulate (regexParse, compileEnfaToDfa, accept)
+import Regulate (compileRegex, accept)
 import Data.Maybe (isJust)
 
 main :: IO ()
 main = do
     regex <- getLine
-    case regexParse regex of
-        Right enfa -> getContents >>= (mapM_ (print . isJust . accept dfa) . lines)
-            where dfa = compileEnfaToDfa enfa
-        Left err -> print err
+    case compileRegex regex of
+        Right dfa -> getContents >>= (mapM_ (print . isJust . accept dfa) . lines)
+        Left err -> putStrLn err

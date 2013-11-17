@@ -6,7 +6,7 @@ import Data.Maybe (isJust)
 
 import RegulateTests.Match
 import RegulateTests.Regex
-import Regulate (DFA(DFA))
+import Regulate.Types (DFA(DFA))
 
 main :: IO ()
 main = do

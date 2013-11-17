@@ -53,3 +53,53 @@ Basic syntax is as follows.
   for word, whitespace, digit, newline or tab characters respectively.
 
 Example: ``(foo|baz)?[abc]e*``
+
+General Documentation
+---------------------
+
+The objective is to generate DFA's from regexes (which can then be
+used to quickly match regexes in linear time.
+In particular, we want to automate the process of creating DFA's for
+the lexers of compilers (such as the one I had to write for the
+rather excellent CS241 course at the university of waterloo\*).
+To this end, we want to read in a list of regular expressions which
+match to named tokens, and generate an array representing the dfa,
+and the lookup table converting valid accept states to each
+particular token. the output format should be a pair of c/c++ array
+initializers.
+
+\* As a side note, please do not use this to generate a compiler for
+CS241, or any similar course. You will likely get in trouble
+when you cannot show you authored the code that generated the DFA.
+
+Notes
+-----
+
+DFA:  Deterministic Finite Automata
+
+At each state, each character either transitions to exactly 1
+state, or goes to an error state.
+very efficient and simple for the machine to verify whether a
+string is accepted by the DFA. However, writing code that
+stitches together DFA's is prohibitively complicated.
+ENFA's are used for this purpose.
+
+ENFA: Episilon Non-Deterministic Finite Automata
+
+At each state, each character can transition to 0 or more states.
+
+(Implicitly, if the character does not transition to any states
+it is said to transition to an error state. In the map, this
+can be represented by the character transitioning to an empty
+set of states, or the character having no transitions at all. In
+practice, we should only ever have the second case.)
+
+A state can also transition to 0 or more states on the epsilon transition,
+meaning a transition that does not consume a character. Repeated epsilon
+transitions may be taken.
+(Epsilon transitions are internally represented by a transition through
+``Nothing``.)
+ENFA's are pretty simple to chain together (the main operations
+being alternation, repetition and concatenation). Therefore,
+we use ENFA's as an intermediate form between regular expressions
+and DFA's.

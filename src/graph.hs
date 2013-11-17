@@ -1,9 +1,13 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-import Regulate (regexParse, compileEnfaToDfa, DFA(DFA), allCharacterClasses,
-                 ENFA(ENFA), sortAndGroupBy, enfaStateSet, LexerDFA(LexerDFA),
-                 compileLexer, lexerParse)
+import Regulate (parseRegex, compileRegex)
+import Regulate.Types
+import Regulate.Util (sortAndGroupBy)
+import Regulate.Enfa (enfaStateSet)
+import Regulate.Lexer (compileLexer)
+import Regulate.Parse (allCharacterClasses)
+
 import Data.GraphViz hiding (parse)
 import Data.GraphViz.Attributes.Complete
 import Data.GraphViz.Exception
@@ -23,25 +27,16 @@ main :: IO ()
 main = do
     [mode, outPath] <- getArgs
     genGraph <- case mode of
-        "lexerDfa" -> return (liftM dfaToDot . getDfaFromLexer)
-        "regexEnfa" -> return (liftM enfaToDot . getEnfaFromRegex)
-        "regexDfa" -> return (liftM (dfaToDot . compileEnfaToDfa) . getEnfaFromRegex)
+        "lexerDfa" -> return (liftM (dfaToDot . getLexerDfa) . compileLexer)
+        "regexEnfa" -> return (liftM enfaToDot . parseRegex)
+        "regexDfa" -> return (liftM dfaToDot . compileRegex)
         _ -> fail "Unknown argument specified"
     dot <- liftM genGraph getContents
     case dot of
-        Just dot' -> graphToDotPng outPath dot' >>= print
-        Nothing -> fail "Could not parse expression into DFA"
-
-getDfaFromLexer :: String -> Maybe DFA
-getDfaFromLexer lexStr = do
-    case lexerParse lexStr of
-        Right lexer -> Just dfa
-            where (LexerDFA dfa _) = compileLexer lexer
-        Left _ -> Nothing
-
-getEnfaFromRegex :: String -> Maybe ENFA
-getEnfaFromRegex = either (const Nothing) Just . regexParse . rstrip
-    where rstrip = reverse . dropWhile (=='\n') . reverse
+        Right dot' -> graphToDotPng outPath dot' >>= print
+        Left err -> putStrLn err
+    where
+    getLexerDfa (LexerDFA dfa _) = dfa
 
 dfaToDot :: DFA -> DotGraph Int
 dfaToDot dfa@(DFA ts _ _) = graphElemsToDot (dfaParams dfa) ns es
