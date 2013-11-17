@@ -1,5 +1,6 @@
 module RegulateTests.Match
     ( regexCaseMatches
+    , regexMatches
     , matchedString
     , mismatchedString
     , RegexCase(RegexCase)

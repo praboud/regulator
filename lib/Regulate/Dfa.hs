@@ -16,7 +16,7 @@ import Data.Maybe (fromJust, isJust, isNothing, fromMaybe, mapMaybe)
 import Data.Char (chr)
 
 import Control.Monad (foldM, (>=>))
-import Control.Arrow (second)
+import Control.Arrow (first, second)
 
 import Regulate.Enfa (epsilonClosure)
 import Regulate.Types
@@ -40,8 +40,10 @@ tokenize :: DFA -> [Symbol] -> Either String [Token Int]
 tokenize (DFA ts q0 as) = tok_h [] q0
     where
     err rs q
-        | Set.member q as = Right $ Token q (reverse rs)
-        | otherwise = Left "Error"
+        | Set.member q as = Right $ Token q rs'
+        | otherwise = Left $ "Error, read '" ++ rs' ++ "'"
+        where
+        rs' = reverse rs
     tok_h rs q us
         | null us = fmap (:[]) $ err rs q
         | isNothing q' = do
@@ -54,7 +56,7 @@ tokenize (DFA ts q0 as) = tok_h [] q0
         q' = ts ! (q, u)
 
 compileEnfaToDfa :: ENFA -> DFA
-compileEnfaToDfa = fst . compileEnfaToDfaExtra
+compileEnfaToDfa enfa@(ENFA _ _ as) = fst $ compileEnfaToDfaExtra (Set.null . Set.intersection as) enfa
 
 
 -- for clarity
@@ -69,8 +71,8 @@ type DFAState = State
  - this function is rather complicated, and you should probably know the ins
  - and outs of ENFAs and DFAs before looking at this
  -}
-compileEnfaToDfaExtra :: ENFA -> (DFA, Map Int (Set State))
-compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray dfaStart acceptStates, codeToState)
+compileEnfaToDfaExtra :: Ord x => (Set State -> x) -> ENFA -> (DFA, Map Int (Set State))
+compileEnfaToDfaExtra mergeKey (ENFA ts q0 as) = (DFA transitionArray dfaStart acceptStates, codeToState)
     where
     dfaStart = (stateToCode Map.!) $ head $ filter (Set.member q0) states
 
@@ -103,7 +105,7 @@ compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray dfaStart acceptStat
     codeToState :: Map DFAState (Set ENFAState)
     codeToState = foldr (\(qs, i) m -> Map.insert i qs m) Map.empty $ zip states [0..]
 
-    transitions = compressDFAMap as $ buildTransitions Map.empty $ epsilonClosure ts q0
+    transitions = compressDFAMap mergeKey $ buildTransitions Map.empty $ epsilonClosure ts q0
     -- every state used in the transitions "proto-dfa"
     states = Set.toList $ Map.foldr (flip $ Map.foldr Set.insert) (Map.keysSet transitions) transitions
 
@@ -141,8 +143,8 @@ compileEnfaToDfaExtra (ENFA ts q0 as) = (DFA transitionArray dfaStart acceptStat
 -- remove duplicate states: those that have exactly the same outbound transitions
 -- TODO: for lexers, we must consider if the states translate into accepting the same token
 type ENFAList = [(Set State, Map Symbol (Set State))]
-compressDFAMap :: Set State -> DFAMap -> DFAMap
-compressDFAMap as = Map.fromList . reduce . Map.toList
+compressDFAMap :: Ord x => (Set State -> x) -> DFAMap -> DFAMap
+compressDFAMap mergeKey = Map.fromList . reduce . Map.toList
     where
     reduce :: ENFAList -> ENFAList
     reduce dfaml
@@ -154,7 +156,7 @@ compressDFAMap as = Map.fromList . reduce . Map.toList
         -- remove all states that have another state with the same output transitions,
         -- and that are both accept states
         (reduced, mapping) = foldr processDuplicates ([], Map.empty)
-                             $ sortAndGroupOn (\(s, ts) -> (Set.null $ Set.intersection s as, ts)) dfaml
+                             $ sortAndGroupOn (first mergeKey) dfaml
         remap q = fromMaybe q $ Map.lookup q mapping
 
     processDuplicates :: ENFAList -> (ENFAList, Map (Set State) (Set State)) -> (ENFAList, Map (Set State) (Set State))

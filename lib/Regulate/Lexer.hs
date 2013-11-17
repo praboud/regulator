@@ -22,7 +22,7 @@ import Regulate.Util
  - tokens
  -}
 lexerTokenize :: LexerDFA -> [Symbol] -> Either String [Token String]
-lexerTokenize (LexerDFA dfa names) cs = fmap (map (\(Token q s) -> Token (names Map.! q) s)) $ tokenize dfa cs
+lexerTokenize (LexerDFA dfa names) = fmap (map (\(Token q s) -> Token (names Map.! q) s)) . tokenize dfa
 
 parseLexer :: String -> Either String LexerENFA
 parseLexer = either (Left . show) Right . parse lexerParser "lexer"
@@ -33,19 +33,19 @@ compileLexer = either Left (Right . compileLexerEnfa) . parseLexer
 lexerParser :: Parser LexerENFA
 lexerParser = sepEndBy1
     (do
-        name <- many1 alphaNum
-        skipMany1 space
+        name <- many1 (char '_' <|> alphaNum)
+        skipMany1 (oneOf " \t")
         enfa <- regexParser
         return (enfa, name))
     (char '\n')
 
 compileLexerEnfa :: LexerENFA -> LexerDFA
-compileLexerEnfa toks = LexerDFA dfa $ Map.map getKind codeToState
+compileLexerEnfa lexer = LexerDFA dfa $ Map.map getKind codeToState
     where
-    (enfa, acceptNames) = foldl combine (ENFA Map.empty 0 Set.empty, Map.empty) toks
+    (enfa, acceptNames) = foldl combine (ENFA Map.empty 0 Set.empty, Map.empty) lexer
     (ENFA ts _ _) = enfa
 
-    (dfa, codeToState) = compileEnfaToDfaExtra enfa
+    (dfa, codeToState) = compileEnfaToDfaExtra (Set.map (`Map.lookup` acceptNames)) enfa
 
     -- maps a set of enfa states (whose combination of states now represents
     -- a single dfa state) to a set of strings

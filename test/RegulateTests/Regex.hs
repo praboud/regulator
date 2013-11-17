@@ -25,7 +25,7 @@ instance Arbitrary Regex where
             ]
         char excl = suchThat (arbitrary :: Gen Char) (\x -> all ($x) [isPrint, isAscii, not . flip elem excl])
         simple =  liftM Simple $ listOf
-                  $ oneof [liftM Lit (char "()[].\\+*|?") , liftM (uncurry Class) $ elements allCharacterClasses]
+                  $ oneof [liftM Lit (char "\n()[].\\+*|?") , liftM (uncurry Class) $ elements allCharacterClasses]
         join = do
             rs <- resize 5 $ listOf1 (arbitrary :: Gen Regex)
             op <- elements [Concat, Alternate]
@@ -35,7 +35,7 @@ instance Arbitrary Regex where
             op <- elements [Repeat0, Repeat1, Optional]
             return $ Mod op r
         charClass = liftM CharClass $ listOf1
-                    $ oneof [liftM Lit (char "[]\\-^") , liftM (uncurry Class) $ elements characterClasses]
+                    $ oneof [liftM Lit (char "\n[]\\-^") , liftM (uncurry Class) $ elements characterClasses]
 
 data Regex = Simple [Symbol]
            | Join JoinOp [Regex]

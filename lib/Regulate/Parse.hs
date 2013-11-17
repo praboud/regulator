@@ -38,7 +38,7 @@ regexParser = liftM (foldr alternate emptyEnfa) $ sepBy1 regexpTermParser (char 
             Just _  -> [x | x <- range (chr 0, chr 255), not $ Set.member x cs']
                 where
                 cs' = Set.fromList cs
-    singleChar = liftM (:[]) $ escapeParser "[]"
+    singleChar = liftM (:[]) $ escapeParser "\n[]"
     charRange = do
         lo <- anyChar
         _ <- char '-'
@@ -62,7 +62,7 @@ regexParser = liftM (foldr alternate emptyEnfa) $ sepBy1 regexpTermParser (char 
             (try parens
              <|> try charClassParser
              <|> try (liftM alternateSingle $ classes allCharacterClasses)
-             <|> liftM singletonEnfa (escapeParser "|()[]+?*.")
+             <|> liftM singletonEnfa (escapeParser "\n|()[]+?*.")
             ) >>= modifier)
 
 allCharacterClasses :: [(String, String)]
