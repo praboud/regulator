@@ -17,11 +17,11 @@ import Control.Arrow(second)
 
 import Data.Array (bounds, assocs)
 import Data.Ix (range)
-import Data.Maybe (isJust, fromJust)
+import Data.Maybe (isJust, fromJust, mapMaybe)
 import Data.List (sort, partition, minimumBy)
-import Data.List.Ordered (nub)
 import Data.Function (on)
 import Data.Char (showLitChar)
+import Data.Set (Set)
 import qualified Data.Set as Set
 import qualified Data.Map as Map
 
@@ -45,9 +45,10 @@ main = do
 dfaToDot :: DFA -> DotGraph Int
 dfaToDot dfa@(DFA ts _ _) = graphElemsToDot (dfaParams dfa) ns es
     where
-    ns = nub $ map (second $ const ()) $ range $ bounds ts
+    ns = map (\q -> (q, ())) $ range (qLo, qHi)
+    ((qLo, _), (qHi, _)) = bounds ts
     es :: [(Int, Int, String)]
-    es = groupEdges $ map (\((from, c), to) -> (from, fromJust to, c)) $ filter (isJust . snd) $ assocs ts
+    es = groupEdges $ mapMaybe (\((from, c), to) -> to >> Just (from, fromJust to, c)) $ assocs ts
 
 -- filter out transitions that transition to an error state
 -- group all transitions that go from the same states
@@ -63,15 +64,23 @@ groupEdges = map consolidateEdges . sortAndGroupOn (\(x, y, _) -> (x, y))
 enfaToDot :: ENFA -> DotGraph Int
 enfaToDot enfa@(ENFA ts _ _)  = graphElemsToDot (enfaParams enfa) ns es
     where
+    epsilonStr = "\x03b5"
+    third f (a, b, c) = (a, b, f c)
     ns = map (\q -> (q, ())) $ Set.toList $ enfaStateSet enfa
-    es = groupEdges (map (\(from, to, c) -> (from, to, fromJust c)) nonEpsilon) ++ map (\(from, to, _) -> (from, to, "None")) epsilon
+    es = groupEdges (map (third fromJust) nonEpsilon) ++ map (third $ const epsilonStr) epsilon
+    -- transitions through the epsilon and non epsilon character respectively
     (nonEpsilon, epsilon) = partition (\(_, _, c) -> isJust c) res
+    -- list of all transitions, in the form (from, to, Maybe by)
+    -- state / node the transition comes from, state it goes to, and the charater it goes by
     res :: [(Int, Int, Maybe Char)]
     res = Map.foldrWithKey (\from ts' ac -> Map.foldrWithKey (\c tos ac' -> Set.foldr (\to ac'' -> (from, to, c) : ac'') ac' tos) ac ts') [] ts
 
-classes :: [(String, Set.Set Char)]
+classes :: [(String, Set Char)]
 classes = ("", Set.empty) : map (second Set.fromList) allCharacterClasses
 
+-- tries to find the character class which has the most in common with a set of characters,
+-- if one exists, otherwise, simply display the character in the set
+-- after finding the closest match, display the difference between the set and the character class
 findClosestClass :: String -> String
 findClosestClass symbols = clsName
                            ++ foldr showLitChar "" (Set.toList (Set.difference symbolSet clsSet))
@@ -84,37 +93,32 @@ findClosestClass symbols = clsName
     diff a b = Set.difference (a `Set.union` b) (Set.intersection a b)
 
 dfaParams :: DFA -> GraphvizParams Int () String () ()
-dfaParams (DFA _ q as) = defaultParams
-    { globalAttributes = gStyle
-    , fmtNode = dfaNodeFormat
-    , fmtEdge = \(_, _, el) -> [toLabel el]
-    }
-    where
-    dfaNodeFormat :: (Int, ()) -> Attributes
-    dfaNodeFormat (n, _) = [shape s, color c]
-        where
-        s = if Set.member n as then DoubleCircle else Circle
-        c = if n == q then Red else Black
+dfaParams  = graphParams (\(DFA _ q as) -> nodeAttrs q as . fst)
 
 enfaParams :: ENFA -> GraphvizParams Int () String () ()
-enfaParams (ENFA _ q as) = defaultParams
+enfaParams = graphParams (\(ENFA _ q as) -> nodeAttrs q as . fst)
+
+-- styles node / state based on whether the state is the starting node,
+-- and / or an accepting node.
+nodeAttrs :: Ord a => a -> Set a -> a -> Attributes
+nodeAttrs q as n = [shape s, color c]
+    where
+    s = if Set.member n as then DoubleCircle else Circle
+    c = if n == q then Red else Black
+
+-- generic styling, independant of enfa / dfa specific logic
+graphParams :: (a -> (Int, ()) -> Attributes) -> a -> GraphvizParams Int () String () ()
+graphParams nodeFormat graph = defaultParams
     { globalAttributes = gStyle
-    , fmtNode = enfaNodeFormat
+    , fmtNode = nodeFormat graph
     , fmtEdge = \(_, _, el) -> [toLabel el]
     }
     where
-    enfaNodeFormat :: (Int, ()) -> Attributes
-    enfaNodeFormat (n, _) = [shape s, color c]
-        where
-        s = if Set.member n as then DoubleCircle else Circle
-        c = if n == q then Red else Black
-
-gStyle :: [GlobalAttributes]
-gStyle = [ gAttrs
-         , NodeAttrs  [textLabel "\\N", shape Circle]
-         , EdgeAttrs  [color Black]
-         ]
-    where
+    gStyle =
+        [ gAttrs
+        , NodeAttrs  [textLabel "\\N", shape Circle]
+        , EdgeAttrs  [color Black]
+        ]
     gAttrs = GraphAttrs
         [ RankDir FromLeft
         , Splines SplineEdges
