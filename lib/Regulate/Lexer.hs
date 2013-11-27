@@ -1,6 +1,9 @@
+{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE RankNTypes #-}
 module Regulate.Lexer
     ( parseLexer
     , compileLexer
+    , compileLexerEnfa
     , lexerTokenize
     ) where
 
@@ -21,16 +24,17 @@ import Regulate.Util
 {- essentially the same idea as below, but assign meaningful names to the
  - tokens
  -}
-lexerTokenize :: LexerDFA -> [Symbol] -> Either String [Token String]
+lexerTokenize :: LexerDFA label -> [Symbol] -> Either String [Token label]
 lexerTokenize (LexerDFA dfa names) = fmap (map (\(Token q s) -> Token (names Map.! q) s)) . tokenize dfa
 
-parseLexer :: String -> Either String LexerENFA
+parseLexer :: String -> Either String (LexerENFA String)
 parseLexer = either (Left . show) Right . parse lexerParser "lexer"
 
-compileLexer :: String -> Either String LexerDFA
-compileLexer = either Left (Right . compileLexerEnfa) . parseLexer
+compileLexer :: String -> Either String (LexerDFA String)
+compileLexer = either Left (Right . (compileLexerEnfa "NIL" combine)) . parseLexer
+    where combine = map toUpper . intercalate "_OR_" . Set.toList
 
-lexerParser :: Parser LexerENFA
+lexerParser :: Parser (LexerENFA String)
 lexerParser = sepEndBy1
     (do
         name <- many1 (char '_' <|> alphaNum)
@@ -39,8 +43,8 @@ lexerParser = sepEndBy1
         return (enfa, name))
     (char '\n')
 
-compileLexerEnfa :: LexerENFA -> LexerDFA
-compileLexerEnfa lexer = LexerDFA dfa $ Map.map getKind codeToState
+compileLexerEnfa :: forall l m. Ord l => m -> (Set l -> m) -> LexerENFA l -> LexerDFA m
+compileLexerEnfa nil precedence lexer = LexerDFA dfa $ Map.map getKind codeToState
     where
     (enfa, acceptNames) = foldl combine (ENFA Map.empty 0 Set.empty, Map.empty) lexer
     (ENFA ts _ _) = enfa
@@ -49,15 +53,15 @@ compileLexerEnfa lexer = LexerDFA dfa $ Map.map getKind codeToState
 
     -- maps a set of enfa states (whose combination of states now represents
     -- a single dfa state) to a set of strings
-    getKind :: Set State -> String
+    getKind :: Set State -> m
     getKind qs = if Set.null filt
-        then "NIL"
-        else (map toUpper . intercalate "_OR_" . Set.toList) filt
+        then nil
+        else precedence filt
         where
         filt = setMapMaybe (`Map.lookup` acceptNames) qs'
         qs' = Set.foldr (\q qs'' -> Set.union qs'' $ epsilonClosure ts q) Set.empty qs
 
-    combine :: (ENFA, Map Int String) -> (ENFA, String) -> (ENFA, Map Int String)
+    combine :: (ENFA, Map Int l) -> (ENFA, l) -> (ENFA, Map Int l)
     combine (enfaAcc, names) (enfa', name) = (enfaAcc', names')
         where
         (offsetAcc, offsetSingle, enfaAcc') = alternateExtra enfaAcc enfa'

@@ -52,7 +52,7 @@ propLexerTokenize (MatchLexerCase rs i m) = testLexerDfa didTokenizeCorrectly $ 
             ts' = map read $ splitOn "_OR_" s
         Right _ -> False
 
-testLexerDfa :: (LexerDFA -> Bool) -> String -> Property
+testLexerDfa :: (LexerDFA String -> Bool) -> String -> Property
 testLexerDfa f = either (const (whenFail (putStrLn "Failed to parse") False)) (property . f) . compileLexer
 
 generateLexerString :: [Regex] -> String

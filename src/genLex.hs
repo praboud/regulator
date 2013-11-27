@@ -8,7 +8,7 @@ import Data.Maybe (fromJust, fromMaybe)
 import qualified Data.Map as Map
 import Data.Char (chr)
 
-toCpp :: LexerDFA -> String
+toCpp :: LexerDFA String -> String
 toCpp (LexerDFA (DFA ts q0 _) as) = header ++ def ++ q0' ++ "\n" ++ ts' ++ "\n" ++ enum ++ "\n" ++ enum_to_string ++ "\n" ++ as' ++ footer
     where
     err = -1 :: Int

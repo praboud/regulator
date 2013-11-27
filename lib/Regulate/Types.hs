@@ -19,9 +19,9 @@ type DFAMap = Map (Set State) (Map Symbol (Set State))
 
 data Token x = Token x [Symbol]
 
-type LexerENFA = [(ENFA, String)]
+type LexerENFA label = [(ENFA, label)]
 
-data LexerDFA = LexerDFA DFA (Map State String)
+data LexerDFA label = LexerDFA DFA (Map State label)
 
-instance Show (Token String) where
-    show (Token name lexeme) = name ++ ": '" ++ lexeme ++ "'"
+instance Show t => Show (Token t) where
+    show (Token name lexeme) = show name ++ ": '" ++ lexeme ++ "'"
