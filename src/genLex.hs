@@ -2,7 +2,7 @@ import Regulate.Types (LexerDFA(LexerDFA), DFA(DFA))
 import Regulate.Lexer (compileLexer)
 import Data.List (intercalate, nub)
 import Text.Printf (printf)
-import Data.Ix (Ix, range, inRange)
+import Data.Ix (range, inRange)
 import Data.Array ((!), bounds)
 import Data.Maybe (fromJust, fromMaybe)
 import qualified Data.Map as Map

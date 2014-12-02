@@ -11,7 +11,7 @@ import Data.Set (Set)
 import qualified Data.Map as Map
 import Data.Map (Map)
 import Data.Array (Array, (!), array, bounds)
-import Data.Ix (Ix, range, inRange)
+import Data.Ix (range, inRange)
 import Data.Maybe (fromJust, isJust, isNothing, fromMaybe, mapMaybe)
 import Data.Char (chr)
 
@@ -22,6 +22,8 @@ import Regulate.Enfa (epsilonClosure)
 import Regulate.Types
 import Regulate.Util (sortAndGroupOn)
 
+-- intemediate representation of a DFA transitions, used during DFA construction
+type DFAMap = Map (Set State) (Map Symbol (Set State))
 
 {- is a string accepted by the regex defined by the dfa?
  - if so, return Just the state that the DFA terminates in
