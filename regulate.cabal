@@ -17,9 +17,9 @@ cabal-version:       >=1.10
 
 library
   other-extensions:    FlexibleInstances
-  build-depends:       base >=4.6 && <4.7,
+  build-depends:       base >=4.6,
                        containers >=0.5 && <0.6,
-                       array >=0.4 && <0.5,
+                       array >=0.4,
                        parsec >=3.1 && <3.2
   default-language:    Haskell2010
   hs-source-dirs:      lib
@@ -35,7 +35,7 @@ library
 executable regulate-match
   main-is: match.hs
   other-extensions:    RankNTypes, ScopedTypeVariables, FlexibleInstances
-  build-depends:       base >=4.6 && <4.7,
+  build-depends:       base >=4.6,
                        regulate
   default-language:    Haskell2010
   hs-source-dirs:      src
@@ -44,9 +44,9 @@ executable regulate-match
 executable regulate-graph
   main-is: graph.hs
   other-extensions:    ScopedTypeVariables, OverloadedStrings
-  build-depends:       base >=4.6 && <4.7,
+  build-depends:       base >=4.6,
                        containers >=0.5 && <0.6,
-                       array >=0.4 && <0.5,
+                       array >=0.4,
                        graphviz >= 2999.16.0,
                        regulate
   default-language:    Haskell2010
@@ -55,9 +55,9 @@ executable regulate-graph
 
 executable regulate-genlex
   main-is: genLex.hs
-  build-depends:       base >=4.6 && <4.7,
+  build-depends:       base >=4.6,
                        containers >=0.5 && <0.6,
-                       array >=0.4 && <0.5,
+                       array >=0.4,
                        regulate
   default-language:    Haskell2010
   hs-source-dirs:      src
@@ -65,7 +65,7 @@ executable regulate-genlex
 
 executable regulate-testlex
   main-is: testLex.hs
-  build-depends:       base >=4.6 && <4.7,
+  build-depends:       base >=4.6,
                        regulate
   default-language:    Haskell2010
   hs-source-dirs:      src
@@ -73,9 +73,9 @@ executable regulate-testlex
 
 executable regulate-tests
   main-is: RegulateTests.hs
-  build-depends:       base >=4.6 && <4.7,
+  build-depends:       base >=4.6,
                        containers >=0.5 && <0.6,
-                       array >=0.4 && <0.5,
+                       array >=0.4,
                        QuickCheck >= 2.6,
                        split,
                        regulate
