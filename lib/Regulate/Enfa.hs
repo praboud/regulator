@@ -24,15 +24,20 @@ import Regulate.Types
 
 -- given a language l, return language l*
 repeat0 :: ENFA -> ENFA
-repeat0 e@(ENFA _ q0 as) = ENFA ts' q0 (Set.insert q0 as)
+repeat0 e@(ENFA _ q0 as) = ENFA (addTransition ts' q0' Nothing q0) q0' (Set.insert q0' as)
     where
-    (ENFA ts' _ _) = repeat1 e
+    -- use repeat1 to add transitions between all accept states and start
+    e'@(ENFA ts' _ _) = repeat1 e
+    -- a new state which we will use as the starting state, and can freely transition to
+    -- the old starting state
+    -- this state also becomes an accept state
+    q0' = fromIntegral (Set.size $ enfaStateSet e')
 
 -- given a language l, return language l+, formally: ll*
 repeat1 :: ENFA -> ENFA
 repeat1 (ENFA ts q0 as) = ENFA ts' q0 as
     where
-    -- added transitions between accept states and start
+    -- added transitions between all accept states and start
     ts' = Set.foldr (\a acc -> addTransition acc a Nothing q0) ts as
 
 -- given a language l, return language l?, formally: ( epsilon | l )
@@ -87,6 +92,7 @@ emptyEnfa = ENFA Map.empty 0 Set.empty
 {- Enfa helpers -}
 
 addTransition :: ENFAMap -> State -> Maybe Symbol -> State -> ENFAMap
+-- add a transition between the states q0 and q1 through c
 addTransition ts q0 c q1 = Map.insertWith (Map.unionWith Set.union) q0 (Map.singleton c $ Set.singleton q1) ts
 
 -- add ``n`` to all states in the ENFA (useful when preparing to merge two ENFAs)
