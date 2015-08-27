@@ -24,14 +24,7 @@ import Regulate.Types
 
 -- given a language l, return language l*
 repeat0 :: ENFA -> ENFA
-repeat0 e@(ENFA _ q0 as) = ENFA (addTransition ts' q0' Nothing q0) q0' (Set.insert q0' as)
-    where
-    -- use repeat1 to add transitions between all accept states and start
-    e'@(ENFA ts' _ _) = repeat1 e
-    -- a new state which we will use as the starting state, and can freely transition to
-    -- the old starting state
-    -- this state also becomes an accept state
-    q0' = fromIntegral (Set.size $ enfaStateSet e')
+repeat0 = optional . repeat1
 
 -- given a language l, return language l+, formally: ll*
 repeat1 :: ENFA -> ENFA
@@ -42,7 +35,13 @@ repeat1 (ENFA ts q0 as) = ENFA ts' q0 as
 
 -- given a language l, return language l?, formally: ( epsilon | l )
 optional :: ENFA -> ENFA
-optional (ENFA ts q0 as) = ENFA ts q0 (Set.insert q0 as)
+optional e@(ENFA ts q0 as) = ENFA (addTransition ts q0' Nothing q0) q0' (Set.insert q0' as)
+    where
+    -- we add a new dummy state in front of the ENFA, which becomes the new starting state.
+    -- the state machine can take an epsilon-transition to the old starting state, or terminate
+    -- here (since this state is an accepting state)
+    -- this state also becomes an accept state
+    q0' = Set.size $ enfaStateSet e
 
 -- given languages l and m, return language lm
 append :: ENFA -> ENFA -> ENFA
@@ -52,41 +51,56 @@ append e1@(ENFA ts q0 as) e2 = ENFA ts' q0 bs'
     -- insert epsilon transitions between accept states of the first enfa, and the start state of the second
     ts' = Map.union us' $ Set.foldr (\a ts'' -> addTransition ts'' a Nothing r0') ts as
 
--- as with alternate, but return the offsets that the respective ENFAs
--- were adjusted by during the computation. for use by the lexer, so even
--- after adjusting the states, we still know what state is what
-alternateExtra :: ENFA -> ENFA -> (Int, Int, ENFA)
-alternateExtra e1 e2 = (offset1, offset2, ENFA vs 0 (as' `Set.union` bs'))
-    where
-    offset1 = 1
-    offset2 = (+1) $ fromIntegral (Set.size $ enfaStateSet e1)
-    (ENFA ts' q0' as') = enfaIncreaseStates e1 offset1
-    (ENFA us' r0' bs') = enfaIncreaseStates e2 offset2
-    vs = Map.insert 0 (Map.singleton Nothing $ Set.fromList [q0', r0']) $ Map.union ts' us'
-
 -- given languages l and m, return language l | m
 alternate :: ENFA -> ENFA -> ENFA
 alternate a b = (\(_,_,x) -> x) $ alternateExtra a b
+
+-- as with alternate, but return the offsets that the respective ENFAs
+-- were adjusted by during the computation. for use by the lexer, so even
+-- after adjusting the states, we still know what state is what
+alternateExtra :: ENFA -> ENFA -> (State -> State, State -> State, ENFA)
+alternateExtra e1 e2 = (id, (+len1), ENFA ts' q0' as')
+    where
+    len1 = Set.size $ enfaStateSet e1
+    len2 = Set.size $ enfaStateSet e2
+
+    (ENFA ts r0 as) = e1
+    (ENFA us s0 bs) = enfaIncreaseStates e2 len1
+
+    q0' = len1 + len2
+    as' = as `Set.union` bs
+    -- we can insert without considering collisions since we've ensured that
+    -- the states are all distinct
+    ts' = Map.insert q0' (Map.singleton Nothing $ Set.fromList [r0, s0]) $ Map.union ts us
 
 -- just a function for convenience / efficiency. this should be equivalent:
 -- alternateSingle = foldr1 alternate $ map singletonEnfa
 -- used to implement regexes like [abc]
 alternateSingle :: [Symbol] -> ENFA
-alternateSingle cs = ENFA ts 0 (Set.singleton 1)
+alternateSingle cs = ENFA ts q0 (Set.singleton q)
     where
-    ts = Map.singleton 0 (foldr (\c a -> Map.insert (Just c) (Set.singleton 1) a) Map.empty cs)
+    q0 = 0 -- starting state
+    q = 1 -- accepting state
+    ts = Map.singleton q0 (Map.fromList [(Just c, Set.singleton q) | c <- cs])
 
 -- return a language which accepts exactly 1 character
 singletonEnfa :: Symbol -> ENFA
-singletonEnfa c = ENFA (Map.singleton 0 (Map.singleton (Just c) (Set.singleton 1))) 0 (Set.singleton 1)
+singletonEnfa c = ENFA (Map.singleton q0 (Map.singleton (Just c) (Set.singleton q))) q0 (Set.singleton q)
+    where
+    q0 = 0 -- starting state
+    q = 1 -- accepting state
 
 -- enfa that accepts the empty string
 emptyEnfaAccept :: ENFA
-emptyEnfaAccept = ENFA Map.empty 0 (Set.singleton 0)
+emptyEnfaAccept = ENFA Map.empty q0 (Set.singleton q0)
+    where
+    q0 = 0 -- starting state
 
 -- enfa that accepts no strings
 emptyEnfa :: ENFA
-emptyEnfa = ENFA Map.empty 0 Set.empty
+emptyEnfa = ENFA Map.empty q0 Set.empty
+    where
+    q0 = 0 -- starting state
 
 
 {- Enfa helpers -}

@@ -46,8 +46,7 @@ lexerParser = sepEndBy1
 compileLexerEnfa :: forall l m. Ord l => m -> (Set l -> m) -> LexerENFA l -> LexerDFA m
 compileLexerEnfa nil precedence lexer = LexerDFA dfa $ Map.map getKind codeToState
     where
-    (enfa, acceptNames) = foldl combine (ENFA Map.empty 0 Set.empty, Map.empty) lexer
-    (ENFA ts _ _) = enfa
+    (enfa, acceptNames) = foldl combine (emptyEnfa, Map.empty) lexer
 
     (dfa, codeToState) = compileEnfaToDfaExtra (Set.map (`Map.lookup` acceptNames)) enfa
 
@@ -64,8 +63,9 @@ compileLexerEnfa nil precedence lexer = LexerDFA dfa $ Map.map getKind codeToSta
     combine :: (ENFA, Map Int l) -> (ENFA, l) -> (ENFA, Map Int l)
     combine (enfaAcc, names) (enfa', name) = (enfaAcc', names')
         where
-        (offsetAcc, offsetSingle, enfaAcc') = alternateExtra enfaAcc enfa'
-        names' = Set.foldr (\a as -> Map.insert (a + offsetSingle) name as) (Map.mapKeysMonotonic (+offsetAcc) names) $ enfaAccept enfa'
+        (xformAcc, xformSingle, enfaAcc') = alternateExtra enfaAcc enfa'
+        -- NOTE: we assume that the transforms on the states are monotonic functions, for efficiency
+        names' = Set.foldr (\a as -> Map.insert (xformSingle a) name as) (Map.mapKeysMonotonic xformAcc names) $ enfaAccept enfa'
 
 {- general helpers -}
 
