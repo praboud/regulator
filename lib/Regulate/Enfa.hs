@@ -116,7 +116,7 @@ enfaIncreaseStates (ENFA ts q0 as) n = ENFA ts' (q0 + n) as'
     as' = Set.mapMonotonic (+n) as
 
 enfaStateSet :: ENFA -> Set State
-enfaStateSet (ENFA ts _ _) = Map.foldr (flip $ Map.foldr Set.union) (Map.keysSet ts) ts
+enfaStateSet (ENFA ts q0 _) = Map.foldr (flip $ Map.foldr Set.union) (Set.insert q0 $ Map.keysSet ts) ts
 
 -- return the states reachable from some set of states via epsilon transitions only
 -- (including the state itself)
