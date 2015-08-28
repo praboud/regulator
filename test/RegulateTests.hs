@@ -36,7 +36,7 @@ propConnected :: DFA -> Bool
 propConnected (DFA ts q0 as) = hasOutbound && hasInbound
     where
     noInbound = foldr (\i ac -> maybe ac (`Set.delete` ac) (ts ! i)) (Set.delete q0 $ Set.fromList $ range (minQ, maxQ)) (range b)
-    hasInbound = Set.empty == noInbound
+    hasInbound = Set.null noInbound
     hasOutbound = all (\q -> Set.member q as || any (\s -> isJust $ ts ! (q, s)) (range (minS, maxS))) $ range (minQ, maxQ)
     b@((minQ, minS), (maxQ, maxS)) = bounds ts
 

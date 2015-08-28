@@ -77,14 +77,15 @@ type DFAState = State
  - 3) Encoding the DFA with a more efficient representation.
  -}
 compileEnfaToDfaExtra :: Ord x => (Set State -> x) -> ENFA -> (DFA, Map DFAState (Set State))
-compileEnfaToDfaExtra mergeKey enfa = encodeDFA enfa transitions
+compileEnfaToDfaExtra mergeKey enfa@(ENFA _ q0 as) = encodeDFA transitions q0' as
     where
-    transitions = compressDFAMap mergeKey $ buildDFAMap enfa
+    -- (transitions, q0') = (buildDFAMap enfa, epsilonClosure enfa $ Set.singleton q0)
+    (transitions, q0') = compressDFAMap mergeKey (buildDFAMap enfa, epsilonClosure enfa $ Set.singleton q0)
 
 -- encode the intermediate DFA representation into a more efficient encoding
 -- instead of each state being represented as a set of ENFA states, we encode each state as an integer
-encodeDFA :: ENFA -> DFAMap -> (DFA, Map DFAState (Set State))
-encodeDFA enfa@(ENFA _ q0 as) ts = (DFA ts' q0' as', codeToState)
+encodeDFA :: DFAMap -> Set State -> Set State -> (DFA, Map DFAState (Set State))
+encodeDFA ts q0 as = (DFA ts' q0' as', codeToState)
     where
     -- get a list of all symbols in use
     syms = concatMap Map.keys $ Map.elems ts
@@ -95,6 +96,7 @@ encodeDFA enfa@(ENFA _ q0 as) ts = (DFA ts' q0' as', codeToState)
         _ -> (minimum syms, maximum syms)
 
     -- every state used in the transitions "proto-dfa"
+    states :: [Set State]
     states = Set.toList $ Map.foldr (flip $ Map.foldr Set.insert) (Map.keysSet ts) ts
 
     -- for converting between ENFA state sets and DFA states
@@ -125,7 +127,7 @@ encodeDFA enfa@(ENFA _ q0 as) ts = (DFA ts' q0' as', codeToState)
     as' = Map.foldrWithKey (\qs c ac -> if overlap as qs then Set.insert c ac else ac) Set.empty stateToCode
 
     q0' :: DFAState
-    q0' = encode $ epsilonClosure enfa $ Set.singleton q0
+    q0' = encode q0
 
     overlap :: Ord x => Set x -> Set x -> Bool
     overlap x y = not $ Set.null $ Set.intersection x y
@@ -138,52 +140,50 @@ encodeDFA enfa@(ENFA _ q0 as) ts = (DFA ts' q0' as', codeToState)
 -- then we take all of them, and essentially are in all possible states
 -- simultaneously
 buildDFAMap :: ENFA -> DFAMap
-buildDFAMap enfa@(ENFA ts q0 _) = addState Map.empty $ Set.singleton q0
+buildDFAMap enfa@(ENFA ts q0 _) = addState Map.empty $ epsilonClosure enfa $ Set.singleton q0
     where
     -- traverse to each possible state in the DFA, building up the DFA transition map as we encounter
     -- new states
     addState :: DFAMap -> Set State -> DFAMap
     addState ts' qs
-        | Map.member qs' ts' = ts' -- we have already encountered that state, do nothing
-        | otherwise = Map.foldr (flip addState) (Map.insert qs' neighbours ts') neighbours
+        | Map.member qs ts' = ts' -- we have already encountered that state, do nothing
+        | otherwise = Map.foldr (flip addState) (Map.insert qs neighbours ts') neighbours
         where
-        qs' = epsilonClosure enfa qs
-
         nonEmptyTransitions :: State -> Map Symbol (Set State)
         nonEmptyTransitions = maybe Map.empty (Map.mapKeysMonotonic fromJust . Map.filterWithKey (\k _ -> isJust k)) . flip Map.lookup ts
 
-        -- all transitions available from qs' (see above)
-        -- we can simultaneously take all of the transitions available from any of the constituent states of qs'
+        -- all transitions available from qs
+        -- we can simultaneously take all of the transitions available from any of the constituent states of qs
         neighbours :: Map Symbol (Set State)
-        neighbours = Set.foldr (\q m -> Map.unionWith Set.union m $ nonEmptyTransitions q) Map.empty qs'
+        neighbours = Map.map (epsilonClosure enfa)
+                     $ Set.foldr (\q m -> Map.unionWith Set.union m $ nonEmptyTransitions q) Map.empty qs
 
 -- remove duplicate states: those that have exactly the same outbound transitions
 -- TODO: for lexers, we must consider if the states translate into accepting the same token
 type ENFAList = [(Set State, Map Symbol (Set State))]
-compressDFAMap :: Ord x => (Set State -> x) -> DFAMap -> DFAMap
-compressDFAMap mergeKey = Map.fromList . reduce . Map.toList
+compressDFAMap :: Ord x => (Set State -> x) -> (DFAMap, Set State) -> (DFAMap, Set State)
+compressDFAMap mergeKey = (first Map.fromList) . reduce . (first Map.toList)
     where
-    reduce :: ENFAList -> ENFAList
-    reduce dfaml
-        | Map.null mapping = dfaml
-        | otherwise = reduce dfaml'
+    reduce :: (ENFAList, Set State) -> (ENFAList, Set State)
+    reduce orig@(dfaml, q0)
+        | Map.null mapping = orig
+        | otherwise = reduce $ (map (second (Map.map remap)) reduced, remap q0)
         where
         -- get a reduced list of states, as well as a mapping of the states
         -- removed to their equivalent states
-        -- we merge states that the same output transitions and merge key
-        (reduced, mapping) = foldr (\(q, m) (qs, ms) -> (Set.insert q qs, Map.union m ms)) (Set.empty, Map.empty)
-                             $ map processDuplicates
+        -- remove all states that have another state with the same output transitions,
+        -- and that are both accept states
+        (reduced, mapping) = foldr processDuplicates ([], Map.empty)
                              $ sortAndGroupOn (first mergeKey) dfaml
-
-        -- after reducing, we've only remapped the source states, not the destinations
-        -- after the entire round of reduction, now we remap these
-        dfaml' = map (second (Map.map remap)) $ Set.toList reduced
         remap q = fromMaybe q $ Map.lookup q mapping
 
-    processDuplicates :: ENFAList -> ((Set State, Map Symbol (Set State)), Map (Set State) (Set State))
-    processDuplicates [] = undefined
-    processDuplicates [q] = (q, Map.empty)
-    processDuplicates xs@((_, ts):_) = ((common, ts), mapping)
+    processDuplicates :: ENFAList -> (ENFAList, Map (Set State) (Set State)) -> (ENFAList, Map (Set State) (Set State))
+    processDuplicates [] _ = undefined
+    processDuplicates xs@((_, ts):_) (ys, mapping) = ((common, ts):ys, mapping')
         where
-        mapping = Map.fromList $ zip (map fst xs) (repeat common)
+        mapping' = case xs of
+            [] -> undefined
+            [_] -> mapping
+            _ -> foldr (flip Map.insert common . fst) mapping xs
+        common :: Set State
         common = foldr1 Set.union $ map fst xs
