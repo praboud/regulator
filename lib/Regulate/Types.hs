@@ -18,6 +18,8 @@ type Symbol = Char
 -- 2) the set of accepting states
 data ENFA = ENFA ENFAMap State (Set State) deriving Show
 
+-- this representation is equivalent to: Map (State, Maybe Symbol) (Set State)
+-- TODO: it may be worth switching to the single-map implementation
 type ENFAMap = Map State (Map (Maybe Symbol) (Set State))
 
 -- a deterministic finite automaton (DFA)

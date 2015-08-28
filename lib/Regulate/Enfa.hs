@@ -16,7 +16,6 @@ module Regulate.Enfa
 import qualified Data.Set as Set
 import Data.Set (Set)
 import qualified Data.Map as Map
-import Data.Maybe (fromMaybe)
 
 import Regulate.Types
 
@@ -119,12 +118,15 @@ enfaIncreaseStates (ENFA ts q0 as) n = ENFA ts' (q0 + n) as'
 enfaStateSet :: ENFA -> Set State
 enfaStateSet (ENFA ts _ _) = Map.foldr (flip $ Map.foldr Set.union) (Map.keysSet ts) ts
 
--- return the states reachable from some state via epsilon transitions only
-epsilonClosure :: ENFAMap -> State -> Set State
-epsilonClosure ts = epsilonClosure_h Set.empty
+-- return the states reachable from some set of states via epsilon transitions only
+-- (including the state itself)
+epsilonClosure :: ENFA -> Set State -> Set State
+epsilonClosure (ENFA ts _ _) states = dfs states Set.empty
     where
-    epsilonClosure_h nbrs q
-        | Set.member q nbrs = nbrs -- we have already visited this node, we are done
-        | otherwise = Set.foldr (flip epsilonClosure_h) (Set.insert q nbrs) adj
+    dfs :: Set State -> Set State -> Set State
+    dfs qs knownClosure
+        | Set.null qs = knownClosure
+        | otherwise = dfs neighbours' (Set.union knownClosure qs)
         where
-        adj = fromMaybe Set.empty (Map.lookup q ts >>= Map.lookup Nothing)
+        neighbours = Set.foldr (\q ns -> maybe ns (Set.union ns) (Map.lookup q ts >>= Map.lookup Nothing)) Set.empty qs
+        neighbours' = Set.difference neighbours knownClosure

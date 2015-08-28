@@ -57,8 +57,7 @@ compileLexerEnfa nil precedence lexer = LexerDFA dfa $ Map.map getKind codeToSta
         then nil
         else precedence filt
         where
-        filt = setMapMaybe (`Map.lookup` acceptNames) qs'
-        qs' = Set.foldr (\q qs'' -> Set.union qs'' $ epsilonClosure ts q) Set.empty qs
+        filt = setMapMaybe (`Map.lookup` acceptNames) $ epsilonClosure enfa qs
 
     combine :: (ENFA, Map Int l) -> (ENFA, l) -> (ENFA, Map Int l)
     combine (enfaAcc, names) (enfa', name) = (enfaAcc', names')

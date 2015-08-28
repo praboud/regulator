@@ -74,7 +74,7 @@ type DFAState = State
  - and outs of ENFAs and DFAs before looking at this
  -}
 compileEnfaToDfaExtra :: Ord x => (Set State -> x) -> ENFA -> (DFA, Map Int (Set State))
-compileEnfaToDfaExtra mergeKey (ENFA ts q0 as) = (DFA transitionArray dfaStart acceptStates, codeToState)
+compileEnfaToDfaExtra mergeKey enfa@(ENFA ts q0 as) = (DFA transitionArray dfaStart acceptStates, codeToState)
     where
     dfaStart = (stateToCode Map.!) $ head $ filter (Set.member q0) states
 
@@ -107,7 +107,7 @@ compileEnfaToDfaExtra mergeKey (ENFA ts q0 as) = (DFA transitionArray dfaStart a
     codeToState :: Map DFAState (Set ENFAState)
     codeToState = foldr (\(qs, i) m -> Map.insert i qs m) Map.empty $ zip states [0..]
 
-    transitions = compressDFAMap mergeKey $ buildTransitions Map.empty $ epsilonClosure ts q0
+    transitions = compressDFAMap mergeKey $ buildTransitions Map.empty $ epsilonClosure enfa $ Set.singleton q0
     -- every state used in the transitions "proto-dfa"
     states = Set.toList $ Map.foldr (flip $ Map.foldr Set.insert) (Map.keysSet transitions) transitions
 
@@ -118,10 +118,6 @@ compileEnfaToDfaExtra mergeKey (ENFA ts q0 as) = (DFA transitionArray dfaStart a
 
     overlap :: Ord x => Set x -> Set x -> Bool
     overlap x y = not $ Set.null $ Set.intersection x y
-
-    -- expands possible states to any reachable by an epsilon transition
-    epsilonClosureForSet :: Set State -> Set State
-    epsilonClosureForSet = Set.foldr (\s ss -> Set.union ss $ epsilonClosure ts s) Set.empty
 
     -- build up a graph which is essentially a dfa whose states are sets of
     -- ENFA states. We consider starting at the start state of the enfa
@@ -139,7 +135,7 @@ compileEnfaToDfaExtra mergeKey (ENFA ts q0 as) = (DFA transitionArray dfaStart a
 
         -- all transitions available from qs' (see above)
         neighbours :: Map Symbol (Set State)
-        neighbours = Map.map epsilonClosureForSet
+        neighbours = Map.map (epsilonClosure enfa)
                      $ Set.foldr (\q m -> Map.unionWith Set.union m $ nonEmptyTransitions q) Map.empty qs
 
 -- remove duplicate states: those that have exactly the same outbound transitions
